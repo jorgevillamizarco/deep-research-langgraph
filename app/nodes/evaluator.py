@@ -92,34 +92,59 @@ def research_evaluator_node(state: ResearchState) -> dict:
     try:
         llm = _get_llm()
 
-        system_prompt = f"""You are a meticulous quality assurance analyst evaluating research findings.
+        system_prompt = f"""You are a meticulous quality assurance analyst evaluating research findings. 
+You have ONE job: catch weak research BEFORE it reaches the final report.
 
-CRITICAL RULES:
-1. Assume the given research topic is correct. Do not question the subject itself.
-2. Your ONLY job is to assess the quality, depth, and completeness of the research.
-3. Focus on: comprehensiveness, use of credible sources with citations, depth of analysis, clarity.
-4. Do NOT fact-check the premise or timeline.
-5. If suggesting follow-up queries, they should dive deeper into the existing topic.
+BE STRICT. A FAIL now costs a 30-second re-search loop. A weak report costs credibility.
 
-Topic: {topic}
+Research topic: {topic}
 
-You MUST respond with a valid JSON object ONLY, no other text:
+EVALUATION RUBRIC:
+
+1. SOURCE QUALITY (score 1-5):
+   - Does the research cite specific sources with URLs? (Not vague "according to experts")
+   - Are at least 40% of sources from authoritative domains? (official docs, GitHub repos, arxiv, research papers)
+   - Are sources recent? (within 1 year unless citing foundational/evergreen references)
+   - Deductions: no citations = score 1, only search snippets = score 2, vendor blogs only = score 3
+
+2. CLAIM VERIFICATION (score 1-5):
+   - Are factual claims backed by citations?
+   - Do numbers/dates/statistics have sources?
+   - Is there evidence the researcher actually READ the sources, not just search snippets?
+   - Deductions: unsupported claims = score 1, just paraphrased abstracts = score 3
+
+3. COMPLETENESS (score 1-5):
+   - Does the research cover ALL major angles of the topic?
+   - Are there obvious gaps or missing perspectives?
+   - Is it deep or shallow? (deep = specific findings, shallow = generic summaries)
+   - Deductions: one-sided = score 1, missing key aspect = score 2
+
+4. CONTRADICTIONS (bonus check):
+   - Does any section contradict another?
+   - Are conflicting sources acknowledged?
+
+GRADING RULES:
+- GRADE "pass" ONLY IF: all three scores ≥4, at least 3 specific citations with URLs, at least 1 quantitative finding (number, percentage, date, statistic)
+- GRADE "fail" for anything less
+- If FAIL, generate 5-7 specific follow-up queries that would fix the weakest areas
+
+You MUST respond with a valid JSON object ONLY:
 {{
   "grade": "pass" or "fail",
-  "comment": "Detailed explanation of the evaluation, highlighting strengths and weaknesses",
+  "comment": "Scores: source_quality=X/5, claim_verification=Y/5, completeness=Z/5. [detailed justification]",
   "follow_up_queries": [
     {{"search_query": "specific follow-up query 1"}},
     {{"search_query": "specific follow-up query 2"}}
   ]
 }}
 
-- Set grade "pass" if research is thorough, well-sourced, and covers the topic.
-- Set grade "fail" if significant gaps exist in depth or coverage, with 5-7 follow_up_queries.
-- follow_up_queries should be null/empty if grade is "pass"."""
+OK grade "pass": only if all scores ≥4, 3+ URL citations present, 1+ quantitative finding.
+Else grade "fail": with 5-7 follow_up_queries.
+follow_up_queries MUST be null/empty if grade is "pass"."""
 
         response = llm.invoke([
             SystemMessage(content=system_prompt),
-            HumanMessage(content=f"Research Findings:\n{findings}"),
+            HumanMessage(content=f"Research Findings to evaluate:\n\n{findings}\n\nApply the rubric. Be strict. Return JSON only."),
         ])
 
         evaluation = _parse_feedback_json(response.content)
