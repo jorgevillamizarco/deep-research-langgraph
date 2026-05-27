@@ -1,66 +1,32 @@
-# Deep Research Agent + dedicated SearXNG
+# Deep Research Agent — uses the existing SearXNG on the host
 #
-# Starts a self-contained stack: agent + its own search backend.
-# The existing standalone SearXNG on port 8080 continues serving Hermes.
+# The agent runs with `--network host` so it can reach your existing
+# SearXNG container at localhost:8080 and the LLM API.
 #
-# Start:   docker compose up -d
-# Logs:    docker compose logs -f
-# Stop:    docker compose down
-#
-# Register in Hermes:   hermes mcp add research --url http://localhost:8100/mcp
-# Register elsewhere:   mcp install http://localhost:8100/mcp
+# Start:       docker compose up -d
+# Stop:        docker compose down
+# Register:    hermes mcp add research --url http://localhost:8100/mcp
+#              (or any MCP client: mcp install http://localhost:8100/mcp)
 
 services:
-  searxng:
-    image: searxng/searxng:latest
-    container_name: deep-research-searxng
-    restart: unless-stopped
-    ports:
-      # Expose on 8081 to avoid conflict with standalone searxng on :8080
-      - "127.0.0.1:8081:8080"
-    volumes:
-      - searxng_config:/etc/searxng:rw
-    environment:
-      - SEARXNG_SECRET_KEY=*** \
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/search?q=health&format=json', timeout=5)"]
-      interval: 15s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-    networks:
-      - research-net
-
   agent:
     build: .
     container_name: deep-research-agent
     restart: unless-stopped
-    ports:
-      - "0.0.0.0:8100:8100"
+    network_mode: host
     env_file:
       - .docker.env
     environment:
-      # Point to the SearXNG container (internal docker DNS)
-      - SEARXNG_URL=http://searxng:8080
+      - SEARXNG_URL=http://localhost:8080
       - RESEARCH_OUTPUT_DIR=/data
     volumes:
       - research_data:/data
-    depends_on:
-      searxng:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python3", "-c", "import httpx; httpx.get('http://localhost:8100/mcp', timeout=5)"]
+      test: ["CMD", "python3", "-c", "import httpx; httpx.get('http://localhost:8100/health', timeout=5)"]
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       retries: 3
-      start_period: 15s
-    networks:
-      - research-net
+      start_period: 10s
 
 volumes:
-  searxng_config:
   research_data:
-
-networks:
-  research-net:
-    driver: bridge
