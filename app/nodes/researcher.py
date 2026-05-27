@@ -222,3 +222,82 @@ def researcher_node(state: ResearchState) -> dict:
         "url_to_short_id": merged_url_map,
         "research_iteration": state.get("research_iteration", 0) + 1,
     }
+
+
+def deliverable_node(state: ResearchState) -> dict:
+    """Phase 2: Produce DELIVERABLE artifacts from accumulated Phase 1 research.
+
+    Uses ALL merged research findings (from parallel researchers + any enhancer
+    supplements) to produce [DELIVERABLE] goals. No new searches — synthesis only.
+
+    This node lives INSIDE the refinement subgraph so that when the enhancer adds
+    follow-up findings, deliverables are regenerated with the full augmented context.
+    """
+    plan = state.get("research_plan", "")
+    findings = state.get("section_research_findings", "")
+
+    if not plan or not findings:
+        return {}
+
+    goals = _parse_goals(plan)
+    deliverable_goals = goals.get("deliverable", [])
+
+    if not deliverable_goals:
+        logger.info("No DELIVERABLE goals in plan — skipping Phase 2")
+        return {}
+
+    llm = _get_llm()
+    logger.info("Phase 2: Producing %d deliverables from %d chars of research",
+                len(deliverable_goals), len(findings))
+
+    deliverables = []
+    for i, goal in enumerate(deliverable_goals):
+        logger.info("Deliverable %d/%d: %s...", i + 1, len(deliverable_goals), goal[:60])
+
+        # Build a prompt that includes per-claim confidence and source tier awareness
+        prompt = f"""You are a report writer producing a high-quality deliverable.
+Using ONLY the research summaries below, produce the requested deliverable.
+
+DELIVERABLE GOAL: {goal}
+
+RESEARCH SUMMARIES (all Phase 1 findings):
+{findings}
+
+Produce the deliverable as specified. Be thorough and cite sources with markdown
+links [Title](URL). Use ONLY the information above — do NOT perform new searches.
+
+PER-CLAIM CONFIDENCE: After every factual claim, append a confidence tag:
+  [CONFIDENCE:5] — direct measurement, primary source, or official data
+  [CONFIDENCE:4] — well-supported by multiple authoritative sources
+  [CONFIDENCE:3] — reasonable inference from available evidence
+  [CONFIDENCE:2] — plausible but weakly sourced or speculative
+  [CONFIDENCE:1] — educated guess, no direct evidence
+
+TAG EVERY CLAIM. If sources conflict, note the discrepancy explicitly."""
+
+        response = llm.invoke([
+            SystemMessage(content="You produce research deliverables from existing findings. Never fabricate."),
+            HumanMessage(content=prompt),
+        ])
+        deliverables.append(f"### Deliverable: {goal}\n\n{response.content.strip()}\n")
+
+    combined_deliverables = "\n\n---\n\n".join(deliverables)
+
+    # Replace the findings with combined research + deliverables for composer
+    # Strip any previous deliverable section to avoid duplication on re-runs
+    import re as _re
+    cleaned_findings = _re.sub(
+        r"\n*## Deliverables.*$", "", findings, flags=_re.DOTALL
+    ).strip()
+
+    merged = f"{cleaned_findings}\n\n## Deliverables\n\n{combined_deliverables}"
+
+    # Extract new citations from deliverables
+    existing_count = len(state.get("url_to_short_id", {}))
+    new_sources, new_url_map = extract_citations_from_content(combined_deliverables, existing_count)
+
+    return {
+        "section_research_findings": merged,
+        "sources": {**state.get("sources", {}), **new_sources},
+        "url_to_short_id": {**state.get("url_to_short_id", {}), **new_url_map},
+    }

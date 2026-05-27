@@ -1,6 +1,6 @@
 """LangGraph deep research agent — main graph definition.
 
-Graph architecture (ADK-aligned with parallel fan-out):
+Graph architecture (ADK-aligned with parallel fan-out + two-phase execution):
 
     planner (plan_generator + section_planner + interrupt)
       │
@@ -11,7 +11,9 @@ Graph architecture (ADK-aligned with parallel fan-out):
       │
       ▼
     [refinement_subgraph]
-      │  evaluator → enhancer (loop)
+      │  deliverable → evaluator → enhancer → deliverable (loop)
+      │  Phase 2: DELIVERABLE goals synthesized from ALL Phase 1 findings.
+      │  Enhancer supplements feed back into full deliverable regeneration.
       │
       ▼
     composer (report_composer + citation replacement)
@@ -29,6 +31,7 @@ from langgraph.graph import StateGraph
 
 from app.nodes import (
     composer_node,
+    deliverable_node,
     enhanced_search_executor_node,
     planner_node,
     research_evaluator_node,
@@ -117,14 +120,23 @@ def merge_findings_node(state: ResearchState) -> dict:
 
 
 # ──────────────────────────────────────────────
-# Build refinement subgraph
+# Build refinement subgraph (Phase 2 + critique)
 # ──────────────────────────────────────────────
 
 
 def build_refinement_subgraph() -> StateGraph:
-    """Build the iterative refinement loop subgraph."""
+    """Build the refinement subgraph with two-phase execution baked in.
+
+    deliverable → evaluator → enhancer → deliverable (loop until PASS or max)
+
+    The deliverable node runs Phase 2: DELIVERABLE goals synthesized from
+    ALL Phase 1 research findings. When enhancer adds follow-up findings,
+    deliverable regenerates with the full augmented context — not a shallow
+    append.
+    """
     builder = StateGraph(ResearchState)
 
+    builder.add_node("deliverable", deliverable_node)
     builder.add_node("evaluator", research_evaluator_node)
     builder.add_node("enhancer", enhanced_search_executor_node)
 
@@ -134,8 +146,9 @@ def build_refinement_subgraph() -> StateGraph:
         {"enhancer": "enhancer", "pass": END},
     )
 
-    builder.add_edge("enhancer", "evaluator")
-    builder.set_entry_point("evaluator")
+    builder.add_edge("enhancer", "deliverable")
+    builder.add_edge("deliverable", "evaluator")
+    builder.set_entry_point("deliverable")
 
     return builder
 

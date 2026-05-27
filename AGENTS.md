@@ -2,14 +2,17 @@
 
 ## Architecture
 
-LangGraph StateGraph with 4 nodes + 1 subgraph:
+LangGraph StateGraph with 4 nodes + 1 subgraph (two-phase execution):
 
 ```
 planner → researcher → [refinement subgraph] → composer → report
                               │
-                    evaluator ─┤─ pass ──→ exit
-                               └─ fail ──→ enhancer → loop
+                    deliverable ─► evaluator ─┤─ pass ──→ exit
+                                ▲              └─ fail ──→ enhancer ──┘
+                                └─────────────────────────── loop ────┘
 ```
+
+Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_researcher nodes (Phase 1) → merge_findings → refinement_subgraph (Phase 2 + critique).
 
 **CLI:** `python -m app.cli --auto "topic"` (auto-approve plan)  
 **MCP:** `python -m app.mcp_server --transport sse --port 8100`  
@@ -23,7 +26,7 @@ planner → researcher → [refinement subgraph] → composer → report
 | `app/cli.py` | Interactive CLI with plan review |
 | `app/mcp_server.py` | MCP server exposing `deep_research` tool |
 | `app/nodes/planner.py` | Plan generation + interrupt for human review |
-| `app/nodes/researcher.py` | Two-phase web research + synthesis |
+| `app/nodes/researcher.py` | Phase 1 research + Phase 2 deliverable synthesis |
 | `app/nodes/evaluator.py` | JSON-prompt quality evaluation |
 | `app/nodes/enhancer.py` | Follow-up search on FAIL grade |
 | `app/nodes/composer.py` | Report synthesis with `<cite>`→ markdown |
