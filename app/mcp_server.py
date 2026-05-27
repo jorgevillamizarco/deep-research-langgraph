@@ -240,7 +240,7 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
     """Run with SSE/HTTP transport (for Docker deployment)."""
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.responses import Response
+    from starlette.responses import Response, JSONResponse
     from starlette.routing import Mount, Route
     import uvicorn
 
@@ -264,8 +264,12 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
             )
         return Response()
 
+    async def health_check(request):
+        return JSONResponse({"status": "ok", "server": "deep-research"})
+
     app = Starlette(
         routes=[
+            Route("/health", endpoint=health_check),
             Route("/mcp", endpoint=handle_sse, methods=["GET"]),
             Mount("/messages/", app=sse.handle_post_message),
         ]

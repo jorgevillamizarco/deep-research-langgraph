@@ -54,8 +54,8 @@ COPY pyproject.toml /app/
 EXPOSE 8100
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; r=httpx.get('http://localhost:8100/mcp', timeout=5); r.raise_for_status()" || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; r=httpx.get('http://localhost:8100/health', timeout=5); r.raise_for_status()" || exit 1
 
 # Default: run MCP SSE server
 ENTRYPOINT ["python", "-m", "app.mcp_server", "--transport", "sse", "--port", "8100"]
