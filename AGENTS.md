@@ -71,3 +71,13 @@ hermes mcp add research --url http://localhost:8100/mcp
 ```
 
 Returns markdown report with citations, saved to `RESEARCH_OUTPUT_DIR`.
+
+## Related Skills
+
+Built with patterns now captured in reusable skills:
+
+| Skill | What |
+|-------|------|
+| `langgraph-agent-patterns` | StateGraph construction, Send API, subgraphs, interrupt/resume, checkpointing, JSON prompting |
+| `langgraph-agent-deployment` | MCP server, Docker, SearXNG, health checks, architecture patterns, quality patterns |
+| `multi-agent-orchestration` | Send API fan-out, pipeline patterns, circuit breaker, human-in-the-loop |
