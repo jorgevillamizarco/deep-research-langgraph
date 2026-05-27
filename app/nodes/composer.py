@@ -84,11 +84,15 @@ def composer_node(state: ResearchState) -> dict:
     {eval_note}
     - Topic: {topic}
 
-    SOURCE QUALITY TIERS (use these when referencing sources):
-      Tier 1 [T1] — academic papers, official docs, government (.gov, .edu, arxiv, IEEE)
-      Tier 2 [T2] — engineering blogs, industry publications, GitHub repos
-      Tier 3 [T3] — community forums, news, vendor content
-    Each source in the JSON has its tier and authority_reason. Respect these in your narrative.
+    SOURCE QUALITY TIERS (for internal quality weighting — do NOT annotate citations with tiers):
+      Tier 1 — academic papers, official docs, government (.gov, .edu, arxiv, IEEE)
+      Tier 2 — engineering blogs, industry publications, GitHub repos
+      Tier 3 — community forums, news, vendor content
+    Each source in the JSON has its tier and authority_reason. Use this metadata to:
+    - Prefer Tier 1/2 sources for key claims
+    - Note when only Tier 3 sources support an important claim
+    - Build the Source Quality Assessment section (aggregate counts, not per-citation labels)
+    Do NOT include [T1]/[T2]/[T3] labels in citation text — the domain speaks for itself.
 
     PER-CLAIM CONFIDENCE: The research findings include [CONFIDENCE:N/5] tags on claims.
     PRESERVE these confidence levels in your report. When a claim has borderline or low

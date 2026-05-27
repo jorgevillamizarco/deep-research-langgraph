@@ -97,13 +97,6 @@ PER-CLAIM CONFIDENCE: After every factual claim, append a confidence tag:
   [CONFIDENCE:2] — plausible but weakly sourced or speculative
   [CONFIDENCE:1] — educated guess, no direct evidence
 
-SOURCE QUALITY: When citing a source, note its tier in the link title:
-  Tier 1 [T1] — academic papers (.edu, arxiv, IEEE), official docs, government (.gov)
-  Tier 2 [T2] — engineering blogs, industry publications, GitHub repos
-  Tier 3 [T3] — community forums, news articles, vendor marketing
-
-Example: "[T1] LangGraph Documentation" or "[T2] Medium Engineering Blog"
-
 TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
 
     synthesis = llm.invoke([
