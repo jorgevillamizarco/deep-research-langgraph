@@ -52,15 +52,16 @@ def extract_citations_from_content(content: str, existing_id_counter: int = 0) -
         url_to_short_id[url] = short_id
         from urllib.parse import urlparse
         domain = urlparse(url).netloc
-        sources[short_id] = {
+        source = {
             "short_id": short_id,
             "title": title or domain,
             "url": url,
             "domain": domain,
-            "tier": 3,  # Default tier, will be refined by critic
-            "authority_reason": "Extracted from research findings",
+            "tier": 3,
+            "authority_reason": "",
             "supported_claims": [],
         }
+        sources[short_id] = annotate_source_tier(source)
 
     # 2. Extract raw URLs not already captured in markdown links
     for match in _RAW_URL_RE.finditer(content):
@@ -76,15 +77,16 @@ def extract_citations_from_content(content: str, existing_id_counter: int = 0) -
         url_to_short_id[url] = short_id
         from urllib.parse import urlparse
         domain = urlparse(url).netloc
-        sources[short_id] = {
+        source = {
             "short_id": short_id,
             "title": domain,
             "url": url,
             "domain": domain,
             "tier": 3,
-            "authority_reason": "Extracted as raw URL from research content",
+            "authority_reason": "",
             "supported_claims": [],
         }
+        sources[short_id] = annotate_source_tier(source)
 
     return sources, url_to_short_id
 

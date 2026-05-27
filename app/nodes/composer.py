@@ -84,19 +84,37 @@ def composer_node(state: ResearchState) -> dict:
     {eval_note}
     - Topic: {topic}
 
+    SOURCE QUALITY TIERS (use these when referencing sources):
+      Tier 1 [T1] — academic papers, official docs, government (.gov, .edu, arxiv, IEEE)
+      Tier 2 [T2] — engineering blogs, industry publications, GitHub repos
+      Tier 3 [T3] — community forums, news, vendor content
+    Each source in the JSON has its tier and authority_reason. Respect these in your narrative.
+
+    PER-CLAIM CONFIDENCE: The research findings include [CONFIDENCE:N/5] tags on claims.
+    PRESERVE these confidence levels in your report. When a claim has borderline or low
+    confidence (≤3), explicitly note the uncertainty: "Evidence suggests..." or
+    "Preliminary data indicates..." rather than stating it as settled fact.
+
     REPORT STRUCTURE (follow this exactly):
     # {topic}: Deep Research Report
     ## Executive Summary
-    [3-5 paragraphs. Standalone — readable without reading the full report.]
+    [3-5 paragraphs. Standalone — readable without reading the full report.
+     Include overall confidence assessment: what's well-established vs speculative.]
 
     ## [Section per topic from the report outline]
-    [Detailed findings with inline citations. Use <cite source="src-N"/> after each claim.]
+    [Detailed findings with inline citations. Use <cite source="src-N"/> after each claim.
+     Preserve [CONFIDENCE:N] tags or translate them into natural uncertainty language.]
 
     ## Cross-Cutting Themes
-    [Patterns across sections. Note any contradictions.]
+    [Patterns across sections. Note any contradictions explicitly — flag them as
+     "CONTRADICTION:" followed by the conflicting claims and their sources.]
 
     ## Gaps & Uncertainties
-    [What's missing or unclear.]
+    [What's missing or unclear. List claims with confidence ≤2 as needing further investigation.]
+
+    ## Source Quality Assessment
+    [Brief assessment of evidence quality: how many Tier 1/2/3 sources, any reliance on
+     low-quality sources for key claims, overall strength of the evidence base.]
 
     ## Methodology
     [Brief note on how the research was conducted: web search, iterative refinement, etc.]
@@ -104,10 +122,12 @@ def composer_node(state: ResearchState) -> dict:
     COMPOSITION RULES:
     1. Every factual claim must have an inline citation tag.
     2. All content must be inline — never reference external files.
-    3. Flag contradictions between different findings explicitly.
+    3. Flag contradictions between different findings explicitly with "CONTRADICTION:" prefix.
     4. Preserve specific numbers, dates, and technical details.
     5. Do NOT include a "References" or "Sources" section — all citations are inline.
-    6. The Executive Summary must be completely standalone."""
+    6. The Executive Summary must be completely standalone.
+    7. NEVER state a low-confidence claim (≤3) as fact — hedge appropriately.
+    8. Prefer Tier 1 sources for key claims; note when only Tier 3 sources are available."""
 
     try:
         response = llm.invoke([

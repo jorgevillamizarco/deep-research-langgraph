@@ -88,7 +88,23 @@ RESEARCH GOAL: {goal}
 SEARCH RESULTS:
 {combined_searches}
 
-Write a comprehensive summary that directly addresses the goal. Include specific findings, data points, and cite sources using markdown links [Title](URL). If sources conflict, note the discrepancy."""
+Write a comprehensive summary that directly addresses the goal. Include specific findings, data points, and cite sources using markdown links [Title](URL). If sources conflict, note the discrepancy.
+
+PER-CLAIM CONFIDENCE: After every factual claim, append a confidence tag:
+  [CONFIDENCE:5] — direct measurement, primary source, or official data
+  [CONFIDENCE:4] — well-supported by multiple authoritative sources
+  [CONFIDENCE:3] — reasonable inference from available evidence
+  [CONFIDENCE:2] — plausible but weakly sourced or speculative
+  [CONFIDENCE:1] — educated guess, no direct evidence
+
+SOURCE QUALITY: When citing a source, note its tier in the link title:
+  Tier 1 [T1] — academic papers (.edu, arxiv, IEEE), official docs, government (.gov)
+  Tier 2 [T2] — engineering blogs, industry publications, GitHub repos
+  Tier 3 [T3] — community forums, news articles, vendor marketing
+
+Example: "[T1] LangGraph Documentation" or "[T2] Medium Engineering Blog"
+
+TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
 
     synthesis = llm.invoke([
         SystemMessage(content="You are a research analyst synthesizing search results into clear summaries."),
