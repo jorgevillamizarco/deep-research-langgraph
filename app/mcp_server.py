@@ -48,6 +48,31 @@ async def handle_list_tools() -> list[types.Tool]:
     """Declare the available research tools."""
     return [
         types.Tool(
+            name="search",
+            description="""Quick web search via SearXNG (Google/Bing/DuckDuckGo aggregated).
+
+Returns a list of results with title, URL, and snippet for each.
+
+Use this for: quick fact-finding, looking up specific URLs, finding recent
+articles or documentation, checking product availability, price checks,
+and any question answerable with a single search.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query — be specific.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Number of results to return (default: 5, max: 15).",
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        types.Tool(
             name="deep_research",
             description="""Run a deep, multi-phase research investigation on any topic.
 
@@ -76,7 +101,7 @@ regulatory landscape reviews, vendor ecosystem mapping, and literature surveys.
                 },
                 "required": ["topic"],
             },
-        )
+        ),
     ]
 
 
@@ -84,9 +109,70 @@ regulatory landscape reviews, vendor ecosystem mapping, and literature surveys.
 async def handle_call_tool(
     name: str, arguments: dict[str, Any] | None
 ) -> list[types.TextContent | types.EmbeddedResource]:
-    """Execute a research tool."""
-    if name != "deep_research":
+    """Execute a research or search tool."""
+    if name == "search":
+        return await _handle_search(arguments)
+    elif name == "deep_research":
+        return await _handle_deep_research(arguments)
+    else:
         raise ValueError(f"Unknown tool: {name}")
+
+
+async def _handle_search(
+    arguments: dict[str, Any] | None
+) -> list[types.TextContent | types.EmbeddedResource]:
+    """Quick web search via SearXNG."""
+    query = (arguments or {}).get("query", "")
+    max_results = min(int((arguments or {}).get("max_results", 5)), 15)
+
+    if not query:
+        return [types.TextContent(type="text", text="Error: 'query' is required.")]
+
+    import httpx
+
+    searxng_url = os.getenv("SEARXNG_URL", "http://localhost:8080")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{searxng_url.rstrip('/')}/search",
+                params={"q": query, "format": "json", "language": "en"},
+                headers={"User-Agent": "DeepResearch-MCP/1.0"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+    except Exception as e:
+        return [
+            types.TextContent(
+                type="text",
+                text=f"Search failed: {e}\n\nTry using DuckDuckGo directly or check if SearXNG is running on {searxng_url}.",
+            )
+        ]
+
+    results = data.get("results", [])[:max_results]
+
+    if not results:
+        return [types.TextContent(type="text", text=f"No results found for: {query}")]
+
+    lines = [f"# Search Results: {query}", ""]
+    for i, r in enumerate(results, 1):
+        title = r.get("title", "Untitled")
+        url = r.get("url", "")
+        snippet = r.get("content", r.get("snippet", ""))
+        engine = r.get("engine", "")
+        lines.append(f"## {i}. [{title}]({url})")
+        if snippet:
+            lines.append(f"   {snippet[:500]}")
+        lines.append("")
+
+    return [types.TextContent(type="text", text="\n".join(lines))]
+
+
+async def _handle_deep_research(
+    arguments: dict[str, Any] | None
+) -> list[types.TextContent | types.EmbeddedResource]:
+    """Run the full LangGraph research pipeline."""
 
     topic = (arguments or {}).get("topic", "")
     max_iterations = (arguments or {}).get("max_iterations", 3)
