@@ -353,10 +353,87 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
     async def health_check(request):
         return JSONResponse({"status": "ok", "server": "deep-research"})
 
+    async def mcp_probe(request):
+        """Handle MCP JSON-RPC over POST (Hermes' default transport).
+
+        Hermes probes by sending an initialize request via POST.
+        If the server responds correctly, Hermes continues with tools/list
+        over POST instead of establishing an SSE stream.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+
+        method = body.get("method", "")
+        request_id = body.get("id", 0)
+
+        if method == "initialize":
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "serverInfo": {"name": "deep-research", "version": "0.1.0"},
+                    "capabilities": {"tools": {}, "resources": {}},
+                },
+            })
+        elif method == "tools/list":
+            # Return actual tools (ADK-aligned)
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "search",
+                            "description": "Quick web search via SearXNG (Google/Bing/DuckDuckGo aggregated). Returns title, URL, and snippet.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string", "description": "The search query"},
+                                    "max_results": {"type": "integer", "description": "Max results (default: 5, max: 15)", "default": 5},
+                                },
+                                "required": ["query"],
+                            },
+                        },
+                        {
+                            "name": "deep_research",
+                            "description": "Run a deep, multi-phase research investigation on any topic. Generates plan, does web research, quality-checks, and returns a fully cited markdown report.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "topic": {"type": "string", "description": "The research topic"},
+                                    "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 3)", "default": 3},
+                                },
+                                "required": ["topic"],
+                            },
+                        },
+                    ]
+                },
+            })
+        elif method == "tools/call":
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "content": [{"type": "text", "text": "For full tool execution, connect via SSE at GET /mcp"}],
+                },
+            })
+        elif method == "notifications/initialized":
+            return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": {}})
+        else:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+            })
+
     app = Starlette(
         routes=[
             Route("/health", endpoint=health_check),
             Route("/mcp", endpoint=handle_sse, methods=["GET"]),
+            Route("/mcp", endpoint=mcp_probe, methods=["POST", "OPTIONS"]),
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )
