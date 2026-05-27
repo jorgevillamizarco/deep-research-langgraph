@@ -15,6 +15,12 @@ dependencies = [
     "mcp>=1.0.0",
 ]
 
+[project.optional-dependencies]
+pdf = [
+    "markdown>=3.0",
+    "weasyprint>=60.0",
+]
+
 [project.scripts]
 deep-research = "app.cli:main"
 deep-research-mcp = "app.mcp_server:main"

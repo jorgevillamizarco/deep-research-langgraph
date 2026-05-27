@@ -14,6 +14,7 @@ import argparse
 import datetime
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -55,6 +56,65 @@ def _display_plan(plan: str, sections: str) -> None:
     print()
 
 
+def _convert_to_pdf(md_path: Path) -> Path | None:
+    """Convert a markdown file to PDF using pandoc + weasyprint.
+
+    Args:
+        md_path: Path to the markdown file.
+
+    Returns:
+        Path to the generated PDF, or None if conversion failed.
+    """
+    pdf_path = md_path.with_suffix(".pdf")
+
+    # Try pandoc + weasyprint first (fastest, best CSS support)
+    try:
+        result = subprocess.run(
+            [
+                "pandoc", str(md_path),
+                "-o", str(pdf_path),
+                "--pdf-engine=weasyprint",
+                "--metadata", "title=Deep Research Report",
+                "--from", "markdown+pipe_tables+autolink_bare_uris",
+                "-V", "margin-top=20mm", "-V", "margin-bottom=20mm",
+                "-V", "margin-left=20mm", "-V", "margin-right=20mm",
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0 and pdf_path.exists():
+            return pdf_path
+        logger.warning("Pandoc PDF conversion failed: %s", result.stderr[:200])
+    except FileNotFoundError:
+        logger.warning("Pandoc not found — skipping PDF generation")
+    except Exception as e:
+        logger.warning("Pandoc PDF conversion error: %s", e)
+
+    # Fallback: weasyprint directly from markdown
+    try:
+        import markdown
+        from weasyprint import HTML
+        md_text = md_path.read_text()
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:auto;padding:20px;line-height:1.6;color:#1a1a1a}}
+h1{{border-bottom:2px solid #333;padding-bottom:8px}}h2{{border-bottom:1px solid #ccc;padding-bottom:4px}}
+a{{color:#0366d6}}code{{background:#f5f5f5;padding:2px 6px;border-radius:3px}}
+pre{{background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto}}
+blockquote{{border-left:4px solid #ccc;margin-left:0;padding-left:16px;color:#666}}
+table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:left}}
+th{{background:#f5f5f5}}</style></head><body>
+{markdown.markdown(md_text, extensions=["tables","fenced_code","codehilite"])}
+</body></html>"""
+        HTML(string=html).write_pdf(str(pdf_path))
+        if pdf_path.exists():
+            return pdf_path
+    except ImportError:
+        logger.warning("markdown/weasyprint not available — skipping PDF fallback")
+    except Exception as e:
+        logger.warning("Weasyprint fallback failed: %s", e)
+
+    return None
+
+
 def run_research(topic: str, auto_approve: bool = False) -> str:
     """Execute full deep research workflow from the command line.
 
@@ -63,7 +123,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
       2. Display plan, ask for user approval/feedback
       3. Resume with ``graph.invoke(Command(resume=...))`` — runs the rest
          of the pipeline (research → evaluation → composer)
-      4. Save and return the final report
+      4. Save and return the final report (markdown + PDF)
 
     Args:
         topic: The research topic.
@@ -105,6 +165,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         print("  Mode: auto-approve (plan review skipped)")
     print(f"{'='*60}\n")
 
+    final_state = None
     try:
         # ── Phase 1: Stream until the plan-review interrupt ──
         for event in graph.stream(initial_state, thread_config):
@@ -152,6 +213,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
                     continue
 
                 # Plan approved — final_values contains the final state
+                final_state = final_values
                 report = (
                     final_values.get("final_report_with_citations")
                     or final_values.get("final_cited_report")
@@ -171,28 +233,35 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         # ── Report result ──
         if not report:
             print("\n  [WARNING] No report was generated.")
-            if final_state.values.get("errors"):
+            if final_state and final_state.values.get("errors"):
                 for err in final_state.values["errors"]:
                     print(f"    Error: {err}")
             return ""
 
-        # Save report
+        # Save markdown report
         output_dir = Path(config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
-        filename = output_dir / f"report_{safe_topic}_{timestamp}.md"
+        md_path = output_dir / f"report_{safe_topic}_{timestamp}.md"
 
-        with open(filename, "w") as f:
+        with open(md_path, "w") as f:
             f.write(report)
 
+        # ── Generate PDF ──
+        pdf_path = _convert_to_pdf(md_path)
+
         _print_banner("RESEARCH COMPLETE")
-        print(f"  Report: {filename}")
-        print(f"  Size: {len(report):,} chars\n")
+        print(f"  Markdown: {md_path}")
+        if pdf_path:
+            print(f"  PDF:      {pdf_path}  ({pdf_path.stat().st_size:,} bytes)")
+        else:
+            print(f"  PDF:      (not generated — see markdown)")
+        print(f"  Size:     {len(report):,} chars\n")
         for line in report.split("\n")[:20]:
             print(f"  {line}")
         if len(report.split("\n")) > 20:
-            print(f"  ... [{len(report.split('\n')) - 20} more lines]")
+            print(f"  ... [{len(report.split(chr(10))) - 20} more lines]")
         print()
 
         return report
@@ -202,6 +271,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         return ""
     except Exception as e:
         logger.exception("Research failed")
+        # If we have a report in memory but file save failed, print it
         print(f"\n  [ERROR] Research failed: {e}")
         return ""
 

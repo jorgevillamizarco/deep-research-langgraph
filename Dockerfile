@@ -45,6 +45,13 @@ RUN pip install --no-cache-dir \
     uvicorn>=0.48.0 \
     && rm -rf /root/.cache
 
+# PDF generation support
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pandoc \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir markdown weasyprint \
+    && rm -rf /root/.cache
+
 # Copy application code
 COPY app/ /app/app/
 COPY tests/ /app/tests/

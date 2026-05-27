@@ -271,13 +271,22 @@ async def _handle_deep_research(
         with open(filename, "w") as f:
             f.write(report)
 
+        # Generate PDF
+        try:
+            from app.cli import _convert_to_pdf
+            pdf_path = _convert_to_pdf(filename)
+        except Exception:
+            pdf_path = None
+
+        pdf_note = f"\n**PDF:** {pdf_path}" if pdf_path else ""
+
         return [
             types.TextContent(
                 type="text",
                 text=f"""## Research Complete
 
 **Topic:** {topic}
-**Report saved:** {filename}
+**Report saved:** {filename}{pdf_note}
 **Report size:** {len(report):,} chars
 
 ---
