@@ -98,6 +98,12 @@ class ResearchState(TypedDict):
     """Whether the human has approved the plan."""
 
     # ── Phase 2: Research execution ──
+    current_goal: str
+    """Current research goal being processed by a parallel researcher."""
+    parallel_goals: list[str]
+    """All research goals extracted from the plan."""
+    parallel_findings: Annotated[list, operator.add]
+    """Accumulated findings from parallel researchers (reducer)."""
     section_research_findings: Optional[str]
     """Combined research findings from all phases."""
     research_iteration: int

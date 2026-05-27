@@ -1,19 +1,17 @@
 """LangGraph deep research agent — main graph definition.
 
-Builds the top-level StateGraph and the iterative refinement subgraph.
-
-Graph architecture (ADK-aligned):
+Graph architecture (ADK-aligned with parallel fan-out):
 
     planner (plan_generator + section_planner + interrupt)
       │
-      ▼
-    researcher (section_researcher: two-phase execution)
+      ├─► Send ─► parallel_researcher(goal 1) ─┐
+      ├─► Send ─► parallel_researcher(goal 2) ─┤── fan-in (merge)
+      ...  (N parallel researchers)            │
+      ├─► Send ─► parallel_researcher(goal N) ─┘
       │
       ▼
-    [refinement_subgraph]  ◄──────────────────────┐
-      │  evaluator (research_evaluator)            │
-      │    ├─ pass ──► exit subgraph               │
-      │    └─ fail ──► enhancer ───────────────────┘ (loop, iteration++)
+    [refinement_subgraph]
+      │  evaluator → enhancer (loop)
       │
       ▼
     composer (report_composer + citation replacement)
@@ -22,10 +20,11 @@ Graph architecture (ADK-aligned):
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, Optional
+from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.constants import END
+from langgraph.types import Send
 from langgraph.graph import StateGraph
 
 from app.nodes import (
@@ -45,32 +44,76 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 
 
-def route_after_evaluation(state: ResearchState) -> Literal["enhancer", "pass"]:
-    """Route after evaluator: loop to enhancer if FAIL, exit if PASS.
-
-    Also exits if max iterations reached.
-    """
+def route_after_evaluation(state: ResearchState):
+    """Route after evaluator: loop to enhancer if FAIL, exit if PASS."""
     evaluation = state.get("research_evaluation")
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 5)
 
     if evaluation and evaluation.grade == "pass":
-        logger.info("Evaluation: PASS — exiting refinement loop")
         return "pass"
-
     if iteration_count >= max_iterations:
-        logger.warning(
-            "Max iterations (%d) reached — exiting refinement loop",
-            max_iterations,
-        )
         return "pass"
+    return "enhancer"
+
+
+def route_after_planner(state: ResearchState):
+    """After planner: fan out to N parallel researchers, one per goal."""
+    goals = state.get("parallel_goals", [])
+    if not goals:
+        # Fallback: go directly to researcher if no parallel goals
+        return "researcher"
+
+    # Fan out: one Send per goal
+    return [
+        Send("parallel_researcher", {"current_goal": g})
+        for g in goals
+    ]
+
+
+# ──────────────────────────────────────────────
+# Parallel researcher node
+# ──────────────────────────────────────────────
+
+
+def parallel_researcher_node(state: ResearchState) -> dict:
+    """Research a single goal in parallel. Called once per goal via Send().
+
+    This is lighter than the full researcher_node — it does one goal,
+    not all goals. Results accumulate via state.parallel_findings reducer.
+    """
+    from app.nodes.researcher import _get_llm, _parse_queries, _research_single_goal
+
+    goal = state.get("current_goal", "")
+    if not goal:
+        return {"parallel_findings": ["No goal assigned"]}
+
+    from app.tools.search import get_search_tool, format_search_results
+
+    search_tool = get_search_tool()
+    llm = _get_llm()
+
+    result = _research_single_goal(goal, search_tool, llm)
 
     logger.info(
-        "Evaluation: FAIL — iterating (%d/%d)",
-        iteration_count,
-        max_iterations,
+        "Parallel researcher done: goal=%s... result=%d chars",
+        goal[:60],
+        len(result),
     )
-    return "enhancer"
+    return {"parallel_findings": [result]}
+
+
+# ──────────────────────────────────────────────
+# Merge node: combines parallel findings
+# ──────────────────────────────────────────────
+
+
+def merge_findings_node(state: ResearchState) -> dict:
+    """Merge all parallel research findings into a single research output."""
+    findings = state.get("parallel_findings", [])
+    combined = "\n\n---\n\n".join(findings) if findings else ""
+    logger.info("Merged %d parallel findings (%d chars)", len(findings), len(combined))
+    return {"section_research_findings": combined}
 
 
 # ──────────────────────────────────────────────
@@ -79,29 +122,19 @@ def route_after_evaluation(state: ResearchState) -> Literal["enhancer", "pass"]:
 
 
 def build_refinement_subgraph() -> StateGraph:
-    """Build the iterative refinement loop subgraph.
-
-    Mirrors ADK's LoopAgent([research_evaluator, EscalationChecker,
-    enhanced_search_executor]).
-    """
+    """Build the iterative refinement loop subgraph."""
     builder = StateGraph(ResearchState)
 
     builder.add_node("evaluator", research_evaluator_node)
     builder.add_node("enhancer", enhanced_search_executor_node)
 
-    # Conditional edge: evaluator → enhancer (fail) or exit (pass)
     builder.add_conditional_edges(
         "evaluator",
         route_after_evaluation,
-        {
-            "enhancer": "enhancer",
-            "pass": END,
-        },
+        {"enhancer": "enhancer", "pass": END},
     )
 
-    # After enhancer, loop back to evaluator
     builder.add_edge("enhancer", "evaluator")
-
     builder.set_entry_point("evaluator")
 
     return builder
@@ -112,43 +145,44 @@ def build_refinement_subgraph() -> StateGraph:
 # ──────────────────────────────────────────────
 
 
-def build_research_graph(
-    checkpointer: Optional[Any] = None,
-) -> StateGraph:
-    """Build and compile the deep research graph.
+def build_research_graph(checkpointer=None):
+    """Build and compile the deep research graph with parallel research.
 
     Args:
         checkpointer: Optional LangGraph checkpointer (default: MemorySaver).
 
     Returns:
-        A compiled ``StateGraph`` ready for invocation.
+        A compiled StateGraph ready for invocation.
     """
     checkpointer = checkpointer or MemorySaver()
 
     builder = StateGraph(ResearchState)
 
-    # Build and attach the refinement subgraph
+    # Build refinement subgraph
     refinement_subgraph = build_refinement_subgraph().compile()
 
     # Add nodes
     builder.add_node("planner", planner_node)
-    builder.add_node("researcher", researcher_node)
+    builder.add_node("researcher", researcher_node)  # fallback (no parallel goals)
+    builder.add_node("parallel_researcher", parallel_researcher_node)
+    builder.add_node("merge_findings", merge_findings_node)
     builder.add_node("refinement_loop", refinement_subgraph)
     builder.add_node("composer", composer_node)
 
-    # Define edges
-    builder.set_entry_point("planner")
+    # Conditional fan-out from planner: Send to parallel researchers
+    builder.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {"researcher": "researcher", "parallel_researcher": "parallel_researcher"},
+    )
 
-    # After planner, always go to researcher
-    builder.add_edge("planner", "researcher")
-
-    # After researcher, enter the refinement subgraph
-    builder.add_edge("researcher", "refinement_loop")
-
-    # After refinement loop exits, go to composer
+    # After parallel researchers complete → merge
+    builder.add_edge("parallel_researcher", "merge_findings")
+    builder.add_edge("researcher", "merge_findings")
+    builder.add_edge("merge_findings", "refinement_loop")
     builder.add_edge("refinement_loop", "composer")
-
-    # After composer, we're done
     builder.add_edge("composer", END)
+
+    builder.set_entry_point("planner")
 
     return builder.compile(checkpointer=checkpointer)
