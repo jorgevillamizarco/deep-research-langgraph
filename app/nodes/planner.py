@@ -105,6 +105,15 @@ def planner_node(state: ResearchState) -> dict:
     sections = _generate_sections(plan)
     goals = _extract_research_goals(plan)
 
+    # Guarantee at least one DELIVERABLE goal
+    if "[DELIVERABLE]" not in plan:
+        plan += (
+            f"\n[DELIVERABLE] Synthesize all findings into a structured summary "
+            f"with key takeaways, ranked recommendations, and a decision matrix "
+            f"where applicable."
+        )
+        logger.info("Added default DELIVERABLE goal to plan")
+
     logger.info("Plan: %d chars | Sections: %d chars | Goals: %d", len(plan), len(sections), len(goals))
 
     resume_value = interrupt({
