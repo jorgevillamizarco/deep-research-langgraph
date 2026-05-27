@@ -119,6 +119,7 @@ Cite sources with markdown links."""
     merged_url_map = {**state.get("url_to_short_id", {}), **new_url_map_merged}
 
     logger.info("Enhancement complete — iteration %d", state.get("iteration_count", 0) + 1)
+    print(f"  🔧 Enhanced — iteration {state.get('iteration_count', 0) + 1} ({len(follow_ups)} queries)", flush=True)
 
     return {
         "section_research_findings": merged,

@@ -155,6 +155,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         "messages": [],
         "errors": [],
         "evaluation_scores": [],
+        "total_tokens": 0,
     }
 
     thread_id = f"research-{int(time.time())}"
@@ -266,7 +267,11 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
             print(f"  PDF:      {pdf_path}  ({pdf_path.stat().st_size:,} bytes)")
         if not md_path and not pdf_path:
             print(f"  Files:    (not saved — report follows below)")
-        print(f"  Size:     {len(report):,} chars\n")
+        print(f"  Size:     {len(report):,} chars")
+        total_tokens_val = final_state.values.get("total_tokens", 0) if final_state else 0
+        if total_tokens_val:
+            print(f"  Tokens:   {total_tokens_val:,}")
+        print()
         for line in report.split("\n")[:20]:
             print(f"  {line}")
         if len(report.split("\n")) > 20:

@@ -210,6 +210,7 @@ async def _handle_deep_research(
         "messages": [],
         "errors": [],
         "evaluation_scores": [],
+        "total_tokens": 0,
     }
 
     import time

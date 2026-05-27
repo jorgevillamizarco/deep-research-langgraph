@@ -60,6 +60,10 @@ hermes mcp add research --url http://localhost:8100/mcp
 | `WORKER_API_BASE` | — | API base URL |
 | `SEARXNG_URL` | `http://localhost:8080` | Self-hosted search |
 | `MAX_SEARCH_ITERATIONS` | `3` | Max critique loops |
+| `RESEARCH_OUTPUT_DIR` | `~/research` | Report output directory |
+| `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
+
+**Multi-model support:** Set `WORKER_MODEL` for research/composition tasks and `CRITIC_MODEL` for evaluation. Use a stronger model for the critic (e.g., Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective for bulk research.
 
 ## MCP Tool: `deep_research`
 

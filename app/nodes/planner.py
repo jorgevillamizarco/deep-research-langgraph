@@ -54,7 +54,12 @@ Maintain the original sequential order. Current date: {today}"""
     else:
         system_prompt = f"""You are a research strategist. Create a **5-point action-oriented research plan** for the given topic.
 Each goal MUST start with: [RESEARCH] or [DELIVERABLE]. RESEARCH goals start with verbs like 'Analyze', 'Identify', 'Investigate'.
-DELIVERABLE goals describe synthesis/output artifacts. Keep each goal concise (1-2 sentences). Current date: {today}"""
+DELIVERABLE goals describe synthesis/output artifacts. Keep each goal concise (1-2 sentences).
+
+CRITICAL: Include at least 1-2 [DELIVERABLE] goals. These are synthesis artifacts (comparison matrices, decision frameworks,
+ranked lists, summary tables) built from the research findings. A plan with only [RESEARCH] goals is INCOMPLETE.
+
+Current date: {today}"""
         user_prompt = f"Research topic: {topic}\n\nGenerate a research plan."
 
     response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])

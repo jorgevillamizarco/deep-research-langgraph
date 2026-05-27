@@ -173,6 +173,9 @@ follow_up_queries MUST be null/empty if grade is "pass"."""
         if evaluation:
             logger.info("Evaluation: %s — %s", evaluation.grade, evaluation.comment[:80])
 
+            emoji = "✅" if evaluation.grade == "pass" else "❌"
+            print(f"  {emoji} Evaluation: {evaluation.grade.upper()} — {evaluation.comment[:100]}", flush=True)
+
             # Extract scores from comment for stagnation detection
             scores_entry = _extract_scores(evaluation.comment, state.get("iteration_count", 0))
 

@@ -124,6 +124,7 @@ def parallel_researcher_node(state: ResearchState) -> dict:
         goal[:60],
         len(result),
     )
+    print(f"  ✓ [{goal[:60]}...] ({len(result):,} chars)", flush=True)
     return {"parallel_findings": [result]}
 
 
@@ -137,6 +138,7 @@ def merge_findings_node(state: ResearchState) -> dict:
     findings = state.get("parallel_findings", [])
     combined = "\n\n---\n\n".join(findings) if findings else ""
     logger.info("Merged %d parallel findings (%d chars)", len(findings), len(combined))
+    print(f"  📦 Phase 1 complete — {len(findings)} goals, {len(combined):,} chars", flush=True)
     return {"section_research_findings": combined}
 
 

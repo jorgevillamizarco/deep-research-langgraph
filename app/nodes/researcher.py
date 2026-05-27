@@ -109,13 +109,13 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
 
 def _parse_queries(content: str) -> list[str]:
     """Parse search queries from LLM response — handles JSON and plain text lists."""
+    import json as json_mod
     # Try JSON first
     try:
-        import json as json_mod
         parsed = json_mod.loads(content)
         if isinstance(parsed, list):
             return [str(q).strip(' "') for q in parsed if q]
-    except (json.JSONDecodeError, ValueError):
+    except (json_mod.JSONDecodeError, ValueError):
         pass
 
     # Try extracting from numbered list
@@ -153,13 +153,9 @@ Use ONLY the information in the research summaries above — do NOT perform new 
 
 def _get_llm() -> Any:
     """Get the chat model for research."""
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=config.worker_model,
-        temperature=0.2,
-        api_key=config.worker_api_key or None,
-        base_url=config.worker_api_base or None,
-    )
+    from app.tokens import get_llm
+    return get_llm(model=config.worker_model, api_key=config.worker_api_key or None,
+                   base_url=config.worker_api_base or None, temperature=0.2)
 
 
 def researcher_node(state: ResearchState) -> dict:
@@ -242,6 +238,7 @@ def deliverable_node(state: ResearchState) -> dict:
     llm = _get_llm()
     logger.info("Phase 2: Producing %d deliverables from %d chars of research",
                 len(deliverable_goals), len(findings))
+    print(f"  📝 Phase 2: {len(deliverable_goals)} deliverables from {len(findings):,} chars", flush=True)
 
     deliverables = []
     for i, goal in enumerate(deliverable_goals):

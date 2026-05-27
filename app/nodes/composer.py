@@ -118,15 +118,13 @@ def composer_node(state: ResearchState) -> dict:
     confidence (≤3), explicitly note the uncertainty: "Evidence suggests..." or
     "Preliminary data indicates..." rather than stating it as settled fact.
 
-    REPORT STRUCTURE (follow this exactly):
+    REPORT STRUCTURE (use the provided outline below as your primary section list):
     # {topic}: Deep Research Report
     ## Executive Summary
     [3-5 paragraphs. Standalone — readable without reading the full report.
      Include overall confidence assessment: what's well-established vs speculative.]
 
-    ## [Section per topic from the report outline]
-    [Detailed findings with inline citations. Use <cite source="src-N"/> after each claim.
-     Preserve [CONFIDENCE:N] tags or translate them into natural uncertainty language.]
+    {sections}
 
     ## Cross-Cutting Themes
     [Patterns across sections. Note any contradictions explicitly — flag them as
@@ -171,6 +169,8 @@ def composer_node(state: ResearchState) -> dict:
 
     # Pass 2: Replace citation tags with markdown links
     report_with_markdown = replace_citation_tags(report_with_tags, sources)
+
+    print(f"  📄 Report generated — {len(report_with_markdown):,} chars", flush=True)
 
     # ── State pruning: cap accumulators to prevent O(N²) checkpoint bloat ──
     # Finding: LangGraph checkpoints grow quadratically with history length.

@@ -137,3 +137,5 @@ class ResearchState(TypedDict):
     evaluation_scores: Annotated[list, operator.add]
     """Per-iteration score breakdowns for stagnation detection.
     Each entry: {iteration, source_quality, claim_verification, completeness}."""
+    total_tokens: Annotated[int, operator.add]
+    """Total LLM tokens consumed across all nodes (accumulated via operator.add)."""
