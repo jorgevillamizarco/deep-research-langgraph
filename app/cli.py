@@ -272,9 +272,16 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         if not md_path and not pdf_path:
             print(f"  Files:    (not saved — report follows below)")
         print(f"  Size:     {len(report):,} chars")
-        total_tokens_val = final_state.values.get("total_tokens", 0) if final_state else 0
-        if total_tokens_val:
-            print(f"  Tokens:   {total_tokens_val:,}")
+        try:
+            if final_state:
+                vals = getattr(final_state, "values", {})
+                if callable(vals):
+                    vals = vals()
+                total_tokens_val = vals.get("total_tokens", 0) if isinstance(vals, dict) else 0
+                if total_tokens_val:
+                    print(f"  Tokens:   {total_tokens_val:,}")
+        except Exception:
+            pass  # Token reporting is non-critical
         print()
         for line in report.split("\n")[:20]:
             print(f"  {line}")
