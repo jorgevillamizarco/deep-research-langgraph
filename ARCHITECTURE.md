@@ -255,6 +255,70 @@ flowchart TB
 | **Dedicated SearXNG with `limiter: false`** | Shared Hermes SearXNG has rate limiting enabled. Research agent needs unlimited access. |
 | **MCP POST JSON-RPC handler** | Hermes probes MCP via POST, not just SSE. Full `initialize` / `tools/list` / `tools/call` dispatch. |
 | **Health check ≥30s** | Long research runs exceed default 5s Docker health check. Prevents flapping. |
+| **State pruning on report** | Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5) to prevent O(N²) checkpoint bloat. Finding: 200-turn agent → 5.3 GB checkpoints without pruning. |
+| **DELIVERABLE failsafe** | Planner prompt mandates 1-2 DELIVERABLE goals. Post-processing appends default if none generated. Deliverable node has string-match failsafe when regex misses the tag. Phase 2 guaranteed to execute. |
+| **Circuit breaker** | Evaluator loop detects score stagnation across 2 iterations. If total score doesn't improve, forces pass to avoid wasted enhancer cycles. Scores parsed from evaluator comments for stagnation detection. |
+
+## Production Features
+
+```mermaid
+flowchart LR
+    subgraph Reliability["Reliability"]
+        CB["Circuit Breaker<br/>score stagnation detection"]
+        SP["State Pruning<br/>O(N²) checkpoint bloat prevention"]
+        CP["SQLite Checkpointing<br/>survives restarts"]
+        GS["Graceful Save<br/>report prints even if file fails"]
+    end
+    subgraph Observability["Observability"]
+        PM["Progress Markers<br/>real-time CLI feedback"]
+        TK["Token Tracking<br/>operator.add accumulator"]
+        ES["Error Surface<br/>errors in Methodology section"]
+    end
+    subgraph Quality["Quality"]
+        DF["DELIVERABLE Failsafe<br/>Phase 2 always executes"]
+        FS["Flexible Structure<br/>planner sections as template"]
+        MM["Multi-Model<br/>separate worker/critic models"]
+    end
+```
+
+### Progress Markers
+
+Real-time CLI feedback at every milestone. All `flush=True` for immediate output:
+
+| Marker | When | Example |
+|--------|------|---------|
+| `✓` | Per-goal research complete | `✓ [Analyze performance...] (10,726 chars)` |
+| `📦` | Phase 1 merge | `📦 Phase 1 complete — 3 goals, 30,575 chars` |
+| `📝` | Phase 2 deliverables | `📝 Phase 2: 2 deliverables from 30,575 chars` |
+| `✅/❌` | Evaluation result | `✅ PASS (5/5, 4/5, 5/5)` or `❌ FAIL (3/5, 3/5, 4/5)` |
+| `🔧` | Enhancer cycle | `🔧 Enhanced — iteration 1 (7 queries)` |
+| `📄` | Report generated | `📄 Report generated — 43,459 chars` |
+
+### State Pruning
+
+Composer caps accumulator lists to prevent quadratic checkpoint growth:
+
+| Field | Cap | Rationale |
+|-------|-----|-----------|
+| `messages` | 20 | Last N messages sufficient for debugging |
+| `errors` | 50 | Accumulated across iterations |
+| `evaluation_scores` | 5 | Only last 2 needed for circuit breaker |
+| `parallel_findings` | 20 | Already merged into section_research_findings |
+
+### Token Tracking
+
+`total_tokens: Annotated[int, operator.add]` state field accumulates token usage across all LLM calls. Shared `get_llm()` in `app/tokens.py` provides single factory for all nodes. CLI reports total on completion. Infrastructure in place — per-node tracking is mechanical follow-up.
+
+### Multi-Model Support
+
+Separate models for research (worker) and evaluation (critic) via environment:
+
+| Variable | Default | Role |
+|----------|---------|------|
+| `WORKER_MODEL` | `deepseek-v4-flash` | Research, composition, deliverables |
+| `CRITIC_MODEL` | `deepseek-v4-flash` | Quality evaluation |
+
+Use a stronger model for critic (Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
 
 ## File Map
 
@@ -274,7 +338,8 @@ deep-research-langgraph/
 │   │   └── composer.py       # Report with structured citations
 │   └── tools/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
-│       └── citations.py      # URL extraction, tier annotation, tag replacement
+│       ├── citations.py      # URL extraction, tier annotation, tag replacement
+│       └── tokens.py         # Shared LLM factory + token tracking
 ├── tests/
 │   └── test_agent.py         # 8 unit tests
 ├── Dockerfile

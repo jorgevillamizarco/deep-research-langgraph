@@ -14,8 +14,8 @@ planner → researcher → [refinement subgraph] → composer → report
 
 Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_researcher nodes (Phase 1) → merge_findings → refinement_subgraph (Phase 2 + critique).
 
-**CLI:** `python -m app.cli --auto "topic"` (auto-approve plan)  
-**MCP:** `python -m app.mcp_server --transport sse --port 8100`  
+**CLI:** `python -m app.cli --auto "topic"` (auto-approve plan)
+**MCP:** `python -m app.mcp_server --transport sse --port 8100`
 **Docker:** `docker compose up -d` (includes SearXNG)
 
 ## Key Files
@@ -23,14 +23,17 @@ Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_
 | File | Purpose |
 |------|---------|
 | `app/agent.py` | StateGraph + subgraph + compilation |
-| `app/cli.py` | Interactive CLI with plan review |
+| `app/state.py` | ResearchState TypedDict + Pydantic models |
+| `app/cli.py` | Interactive CLI with plan review + progress markers + PDF |
 | `app/mcp_server.py` | MCP server exposing `deep_research` tool |
-| `app/nodes/planner.py` | Plan generation + interrupt for human review |
-| `app/nodes/researcher.py` | Phase 1 research + Phase 2 deliverable synthesis |
-| `app/nodes/evaluator.py` | JSON-prompt quality evaluation |
-| `app/nodes/enhancer.py` | Follow-up search on FAIL grade |
-| `app/nodes/composer.py` | Report synthesis with `<cite>`→ markdown |
+| `app/nodes/planner.py` | Plan generation + interrupt + DELIVERABLE guarantee |
+| `app/nodes/researcher.py` | Phase 1 research + Phase 2 deliverable (with failsafe) |
+| `app/nodes/evaluator.py` | JSON-prompt quality evaluation + score extraction |
+| `app/nodes/enhancer.py` | Follow-up search + synthesis |
+| `app/nodes/composer.py` | Report synthesis with `<cite>`→ markdown + state pruning |
 | `app/tools/search.py` | Tavily → SearXNG → DuckDuckGo fallback |
+| `app/tools/citations.py` | URL extraction, tier annotation, tag replacement |
+| `app/tokens.py` | Shared LLM factory + token tracking |
 | `docker-compose.yml` | Agent + SearXNG deployment |
 
 ## Running
@@ -54,7 +57,7 @@ hermes mcp add research --url http://localhost:8100/mcp
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WORKER_MODEL` | `deepseek-v4-flash` | LLM for research tasks |
+| `WORKER_MODEL` | `deepseek-v4-flash` | LLM for research/composition |
 | `CRITIC_MODEL` | `deepseek-v4-flash` | LLM for evaluation |
 | `WORKER_API_KEY` | — | API key for worker model |
 | `WORKER_API_BASE` | — | API base URL |
@@ -63,7 +66,7 @@ hermes mcp add research --url http://localhost:8100/mcp
 | `RESEARCH_OUTPUT_DIR` | `~/research` | Report output directory |
 | `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
 
-**Multi-model support:** Set `WORKER_MODEL` for research/composition tasks and `CRITIC_MODEL` for evaluation. Use a stronger model for the critic (e.g., Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective for bulk research.
+**Multi-model support:** Set `WORKER_MODEL` for research/composition tasks and `CRITIC_MODEL` for evaluation. Use a stronger model for the critic (e.g., Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
 
 ## MCP Tool: `deep_research`
 
@@ -74,13 +77,35 @@ hermes mcp add research --url http://localhost:8100/mcp
 }
 ```
 
-Returns markdown report with citations, saved to `RESEARCH_OUTPUT_DIR`.
+Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 
-## Production Notes
+## Production Features
 
-- **State pruning:** Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5, parallel_findings: 20) to prevent O(N²) checkpoint bloat (5.3 GB observed at 200 turns).
-- **Checkpointing:** SQLite by default via `langgraph-checkpoint-sqlite`. Survives MCP server restarts.
-- **Circuit breaker:** Evaluator loop detects score stagnation across 2 iterations — forces pass to avoid wasted cycles.
+| Feature | How |
+|---------|-----|
+| **Progress markers** | Real-time CLI: ✓ per-goal, 📦 Phase 1, 📝 Phase 2, ✅/❌ eval, 🔧 enhancer, 📄 report |
+| **State pruning** | Composer caps lists (messages:20, errors:50, scores:5) — prevents O(N²) checkpoint bloat |
+| **Circuit breaker** | Score stagnation across 2 iterations → force pass, saves API costs |
+| **SQLite checkpointing** | Survives MCP server restarts, zero-config |
+| **Graceful save** | Report prints to stdout even if file write fails |
+| **DELIVERABLE failsafe** | Prompt mandate + post-processing append + regex failsafe — Phase 2 always executes |
+| **PDF generation** | Automatic pandoc+weasyprint output alongside markdown |
+| **Token tracking** | `total_tokens` state field with `operator.add` reducer |
+| **Error surface** | Non-fatal errors + evaluation scores in Methodology section |
+| **Flexible structure** | Composer uses planner's section outline as primary template |
+
+## Quality Pipeline
+
+```mermaid
+flowchart LR
+    P[Planner] -->|DELIVERABLE guarantee| R[Phase 1: Research]
+    R --> D[Phase 2: Deliverable]
+    D --> E[Evaluator: numeric rubric]
+    E -->|FAIL| EN[Enhancer: follow-up queries]
+    EN --> D
+    E -->|PASS| C[Composer: cited report]
+    C -->|prune state| PDF[MD + PDF output]
+```
 
 ## Related Skills
 
