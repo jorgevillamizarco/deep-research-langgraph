@@ -231,6 +231,11 @@ def deliverable_node(state: ResearchState) -> dict:
     goals = _parse_goals(plan)
     deliverable_goals = goals.get("deliverable", [])
 
+    # Failsafe: if plan has [DELIVERABLE] tag but regex didn't catch it
+    if not deliverable_goals and "[DELIVERABLE]" in plan:
+        deliverable_goals = ["Synthesize all research findings into a comprehensive deliverable"]
+        logger.info("Failsafe: extracted DELIVERABLE from plan tag")
+
     if not deliverable_goals:
         logger.info("No DELIVERABLE goals in plan — skipping Phase 2")
         return {}
