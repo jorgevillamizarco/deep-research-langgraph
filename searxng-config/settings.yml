@@ -1,0 +1,23 @@
+use_default_settings: true
+general:
+  instance_name: "Deep Research Agent"
+  privacypolicy_url: false
+  contact_url: false
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "deep-research-searxng"
+  limiter: false
+  image_proxy: false
+  method: "GET"
+
+ui:
+  static_use_hash: true
+  default_theme: simple
+  default_locale: en
