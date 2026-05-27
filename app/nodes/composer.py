@@ -56,6 +56,8 @@ def composer_node(state: ResearchState) -> dict:
     sources = state.get("sources", {})
     evaluations = state.get("research_evaluation")
     topic = state.get("topic", "")
+    errors = state.get("errors", [])
+    scores = state.get("evaluation_scores", [])
 
     if not findings:
         return {
@@ -70,6 +72,21 @@ def composer_node(state: ResearchState) -> dict:
     if evaluations:
         eval_note = f"\nThe research was evaluated as: {evaluations.grade.upper()}\nEvaluator comment: {evaluations.comment}\n"
 
+    errors_note = ""
+    if errors:
+        error_list = "\n".join(f"  - {e}" for e in errors)
+        errors_note = f"\nNON-FATAL ERRORS encountered during research (note in Methodology):\n{error_list}\n"
+
+    scores_note = ""
+    if scores:
+        last = scores[-1]
+        scores_note = (
+            f"\nFINAL EVALUATION SCORES: source_quality={last.get('source_quality','?')}/5, "
+            f"claim_verification={last.get('claim_verification','?')}/5, "
+            f"completeness={last.get('completeness','?')}/5 "
+            f"(after {len(scores)} iteration(s))\n"
+        )
+
     system_prompt = f"""You are a professional research report composer. Transform the provided data into a polished, meticulously cited research report.
 
     CRITICAL CITATION SYSTEM:
@@ -82,6 +99,8 @@ def composer_node(state: ResearchState) -> dict:
     - Citation Sources (JSON): {sources_json}
     - Report Structure: {sections}
     {eval_note}
+    {scores_note}
+    {errors_note}
     - Topic: {topic}
 
     SOURCE QUALITY TIERS (for internal quality weighting — do NOT annotate citations with tiers):
@@ -121,7 +140,9 @@ def composer_node(state: ResearchState) -> dict:
      low-quality sources for key claims, overall strength of the evidence base.]
 
     ## Methodology
-    [Brief note on how the research was conducted: web search, iterative refinement, etc.]
+    [Brief note on how the research was conducted: web search, iterative refinement, etc.
+     If NON-FATAL ERRORS were reported, note them here. If scores improved across iterations,
+     mention the refinement process.]
 
     COMPOSITION RULES:
     1. Every factual claim must have an inline citation tag.

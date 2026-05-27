@@ -209,6 +209,7 @@ async def _handle_deep_research(
         "final_report_with_citations": None,
         "messages": [],
         "errors": [],
+        "evaluation_scores": [],
     }
 
     import time

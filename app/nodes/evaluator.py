@@ -19,6 +19,27 @@ from app.state import Feedback, ResearchState, SearchQuery
 logger = logging.getLogger(__name__)
 
 
+def _extract_scores(comment: str, iteration: int) -> dict | None:
+    """Parse numeric scores from evaluator comment for stagnation detection.
+
+    Expected format: "Scores: source_quality=4/5, claim_verification=3/5, completeness=4/5. ..."
+
+    Returns dict with iteration + scores, or None if parsing fails.
+    """
+    import re
+    sq = re.search(r"source_quality=(\d+)/5", comment)
+    cv = re.search(r"claim_verification=(\d+)/5", comment)
+    cp = re.search(r"completeness=(\d+)/5", comment)
+    if sq and cv and cp:
+        return {
+            "iteration": iteration,
+            "source_quality": int(sq.group(1)),
+            "claim_verification": int(cv.group(1)),
+            "completeness": int(cp.group(1)),
+        }
+    return None
+
+
 def _get_llm() -> Any:
     """Get the chat model for evaluation."""
     from langchain_openai import ChatOpenAI
@@ -151,7 +172,14 @@ follow_up_queries MUST be null/empty if grade is "pass"."""
 
         if evaluation:
             logger.info("Evaluation: %s — %s", evaluation.grade, evaluation.comment[:80])
-            return {"research_evaluation": evaluation}
+
+            # Extract scores from comment for stagnation detection
+            scores_entry = _extract_scores(evaluation.comment, state.get("iteration_count", 0))
+
+            return {
+                "research_evaluation": evaluation,
+                "evaluation_scores": [scores_entry] if scores_entry else [],
+            }
         else:
             # Fallback: return a fail with generic comment
             logger.warning("Could not parse evaluator response, returning fail")

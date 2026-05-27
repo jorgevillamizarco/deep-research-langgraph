@@ -134,3 +134,6 @@ class ResearchState(TypedDict):
     """Max refinement loops before forcing pass."""
     errors: list[str]
     """Accumulated non-fatal errors for graceful degradation."""
+    evaluation_scores: Annotated[list, operator.add]
+    """Per-iteration score breakdowns for stagnation detection.
+    Each entry: {iteration, source_quality, claim_verification, completeness}."""

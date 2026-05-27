@@ -48,7 +48,11 @@ logger = logging.getLogger(__name__)
 
 
 def route_after_evaluation(state: ResearchState):
-    """Route after evaluator: loop to enhancer if FAIL, exit if PASS."""
+    """Route after evaluator: loop to enhancer if FAIL, exit if PASS.
+
+    Includes circuit breaker: if scores stagnate across 2 consecutive enhancer
+    cycles (no improvement), force-exit to avoid wasted iterations.
+    """
     evaluation = state.get("research_evaluation")
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 5)
@@ -57,6 +61,23 @@ def route_after_evaluation(state: ResearchState):
         return "pass"
     if iteration_count >= max_iterations:
         return "pass"
+
+    # Circuit breaker: detect score stagnation
+    scores = state.get("evaluation_scores", [])
+    if len(scores) >= 2:
+        # Get total scores for last two iterations
+        def _total(s):
+            return s.get("source_quality", 0) + s.get("claim_verification", 0) + s.get("completeness", 0)
+        last_two = sorted(scores, key=lambda s: s.get("iteration", 0))[-2:]
+        if _total(last_two[0]) >= _total(last_two[1]):
+            logger.info(
+                "Circuit breaker: scores stagnant at %d/%d across iterations "
+                "%d-%d — forcing pass",
+                _total(last_two[1]), 15,
+                last_two[0].get("iteration", 0), last_two[1].get("iteration", 0),
+            )
+            return "pass"
+
     return "enhancer"
 
 

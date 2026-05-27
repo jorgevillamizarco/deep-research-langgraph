@@ -154,6 +154,7 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         "final_report_with_citations": None,
         "messages": [],
         "errors": [],
+        "evaluation_scores": [],
     }
 
     thread_id = f"research-{int(time.time())}"
@@ -238,25 +239,33 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
                     print(f"    Error: {err}")
             return ""
 
-        # Save markdown report
-        output_dir = Path(config.output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
-        md_path = output_dir / f"report_{safe_topic}_{timestamp}.md"
+        # Save markdown report (graceful degradation on save failure)
+        md_path = None
+        pdf_path = None
+        try:
+            output_dir = Path(config.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
+            md_path = output_dir / f"report_{safe_topic}_{timestamp}.md"
 
-        with open(md_path, "w") as f:
-            f.write(report)
+            with open(md_path, "w") as f:
+                f.write(report)
 
-        # ── Generate PDF ──
-        pdf_path = _convert_to_pdf(md_path)
+            # ── Generate PDF ──
+            pdf_path = _convert_to_pdf(md_path)
+        except (PermissionError, OSError) as e:
+            logger.warning("Could not save report to file: %s — printing to stdout only", e)
+            md_path = None
+            pdf_path = None
 
         _print_banner("RESEARCH COMPLETE")
-        print(f"  Markdown: {md_path}")
+        if md_path:
+            print(f"  Markdown: {md_path}")
         if pdf_path:
             print(f"  PDF:      {pdf_path}  ({pdf_path.stat().st_size:,} bytes)")
-        else:
-            print(f"  PDF:      (not generated — see markdown)")
+        if not md_path and not pdf_path:
+            print(f"  Files:    (not saved — report follows below)")
         print(f"  Size:     {len(report):,} chars\n")
         for line in report.split("\n")[:20]:
             print(f"  {line}")
