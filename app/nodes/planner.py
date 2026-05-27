@@ -90,9 +90,16 @@ def planner_node(state: ResearchState) -> dict:
     user_feedback = state.get("user_feedback")
     plan_approved = state.get("plan_approved", False)
 
+    # If already approved with a plan, pass through
     if plan_approved and previous_plan:
         logger.info("Plan already approved — skipping planner")
         return {}
+
+    # If resuming from interrupt with approval but no plan in state yet,
+    # regenerate (the plan text was in the interrupt payload, lost on resume)
+    if plan_approved and not previous_plan:
+        logger.info("Plan approved on resume — regenerating with same prompt")
+        # Fall through to regenerate — prompt includes DELIVERABLE mandate
 
     plan = _generate_plan(topic, previous_plan, user_feedback)
     sections = _generate_sections(plan)
@@ -109,10 +116,16 @@ def planner_node(state: ResearchState) -> dict:
 
     if isinstance(resume_value, dict):
         if resume_value.get("plan_approved"):
+            # Use plan from resume value if passed (avoids regeneration on auto-approve)
+            approved_plan = resume_value.get("research_plan", plan)
+            approved_sections = resume_value.get("report_sections", sections)
+            # Re-extract goals from the original plan (may differ from regenerated)
+            if resume_value.get("research_plan"):
+                goals = _extract_research_goals(approved_plan)
             logger.info("Plan approved — %d parallel goals for fan-out", len(goals))
             return {
-                "research_plan": plan,
-                "report_sections": sections,
+                "research_plan": approved_plan,
+                "report_sections": approved_sections,
                 "plan_approved": True,
                 "user_feedback": None,
                 "parallel_goals": goals,

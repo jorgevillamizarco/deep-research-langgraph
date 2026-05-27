@@ -188,7 +188,11 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
                     _display_plan(plan, sections)
 
                 if auto_approve:
-                    resume_value = {"plan_approved": True}
+                    resume_value = {
+                        "plan_approved": True,
+                        "research_plan": plan,
+                        "report_sections": sections,
+                    }
                 else:
                     print("  Options:")
                     print("    yes       — Approve plan and start research")
