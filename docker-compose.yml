@@ -1,0 +1,69 @@
+# Deep Research Agent + SearXNG
+#
+# Start:      docker compose up -d
+# Stop:       docker compose down
+# Logs:       docker compose logs -f
+# Register:   hermes mcp add research --url http://localhost:8100/mcp
+#
+# The agent container requires API keys via .env file or Docker secrets.
+# Create a .docker.env file:
+#   WORKER_API_KEY=sk-...
+#   WORKER_API_BASE=https://api.deepseek.com
+#   WORKER_MODEL=deepseek-v4-flash
+#   CRITIC_API_KEY=sk-...
+#   CRITIC_API_BASE=https://api.deepseek.com
+#   CRITIC_MODEL=deepseek-v4-flash
+#   MAX_SEARCH_ITERATIONS=3
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: deep-research-searxng
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - searxng_config:/etc/searxng:rw
+    environment:
+      - SEARXNG_SECRET_KEY=*** \
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/search?q=health&format=json', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - research-net
+
+  agent:
+    build: .
+    container_name: deep-research-agent
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    env_file:
+      - .docker.env
+    environment:
+      - SEARXNG_URL=http://searxng:8080
+      - RESEARCH_OUTPUT_DIR=/data
+    volumes:
+      - research_data:/data
+    depends_on:
+      searxng:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import httpx; httpx.get('http://localhost:8100/mcp', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - research-net
+
+volumes:
+  searxng_config:
+  research_data:
+
+networks:
+  research-net:
+    driver: bridge

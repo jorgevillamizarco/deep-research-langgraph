@@ -1,0 +1,260 @@
+RETAIL BANKING VALUE CHAIN & ISV ECOSYSTEM ANALYSIS (EMEA)
+
+CONTEXT:
+Analyze the Retail Banking sub-vertical in the EMEA region using the BIAN (Banking Industry Architecture Network) service domains framework. Deconstruct the operational value chain, derive enterprise use cases per phase, and map active ISVs to those use cases.
+
+ROLE: Expert FSI Strategy Consultant, Market Analyst, and Solutions Architect.
+
+REQUIREMENTS:
+1. BIAN-ALIGNED VALUE CHAIN: Break down Retail Banking into discrete BIAN-aligned operational phases (e.g., Product Lifecycle Management, Customer Acquisition & Onboarding, Account Servicing, Lending, Payments, Financial Crime & Compliance, Analytics & Insights, Channel Delivery). Provide 1-2 sentence operational definitions.
+
+2. USE CASE DERIVATION: For each value chain phase, extract all core functional, regulatory, and technical use cases required by modern enterprise architectures. Be specific about technical integration patterns (APIs, event-driven, cloud-native).
+
+3. ISV ECOSYSTEM MAPPING: Cross-reference every use case against the provided ISV reference list AND web research. Map EMEA-headquartered or dominant EMEA-market ISVs.
+
+4. OUTPUT: A single unified Markdown table with columns: Value Chain Stage | Technical/Functional Use Cases | Mapped ISVs (EMEA Focused)
+   - Use case cells: separate entries with line breaks or bullet lists
+   - ISV cells: bulleted list with vendor name, HQ location, and core product
+   - Gaps: explicitly state "No verifiable ISV identified for this use case."
+
+REFERENCE ISV DATASET (Retail Banking in EMEA):
+[
+  {
+    "name": "Mambu",
+    "hq": "Amsterdam, Netherlands",
+    "product": "Composable Cloud Banking Platform",
+    "cloud": "AWS (Listed), GCP (Listed), Azure (Integration)",
+    "url": "https://mambu.com"
+  },
+  {
+    "name": "Temenos",
+    "hq": "Geneva, Switzerland",
+    "product": "Transact Core Banking & Infinity",
+    "cloud": "Azure (Listed), AWS (Partner-Led), GCP (Strategic)",
+    "url": "https://www.temenos.com"
+  },
+  {
+    "name": "Thought Machine",
+    "hq": "London, UK",
+    "product": "Vault Core (Smart Contract Ledger)",
+    "cloud": "AWS (Listed), Azure (Listed), GCP (Partner)",
+    "url": "https://thoughtmachine.net"
+  },
+  {
+    "name": "Backbase",
+    "hq": "Amsterdam, Netherlands",
+    "product": "Engagement Banking Platform",
+    "cloud": "Azure (Listed), AWS (Integration)",
+    "url": "https://backbase.com"
+  },
+  {
+    "name": "10x Banking",
+    "hq": "London, UK",
+    "product": "SuperCore (SaaS Core Banking)",
+    "cloud": "AWS (Strategic Partner), GCP & Azure (Partner-Led)",
+    "url": "https://www.10xbanking.com"
+  },
+  {
+    "name": "Skaleet",
+    "hq": "Boulogne-Billancourt, France",
+    "product": "Core Banking Platform (Speedboat)",
+    "cloud": "Cloud Agnostic / Private Cloud Focus",
+    "url": "https://www.skaleet.com"
+  },
+  {
+    "name": "Sopra Banking (SBS)",
+    "hq": "Paris, France",
+    "product": "Sopra Banking Platform (SBP)",
+    "cloud": "AWS (Listed), T-Systems (Private/Sovereign)",
+    "url": "https://sbs-software.com"
+  },
+  {
+    "name": "Finastra",
+    "hq": "London, UK",
+    "product": "FusionFabric.cloud & Core Suites",
+    "cloud": "Azure (Listed), AWS (Partner-Led)",
+    "url": "https://www.finastra.com"
+  },
+  {
+    "name": "Oradian",
+    "hq": "Zagreb, Croatia",
+    "product": "Cloud-native Core for Emerging Markets",
+    "cloud": "AWS (Listed)",
+    "url": "https://oradian.com"
+  },
+  {
+    "name": "SDK.finance",
+    "hq": "Vilnius, LT",
+    "product": "White-label Fintech Platform",
+    "cloud": "AWS (Integrated), Agnostic",
+    "url": "sdk.finance"
+  },
+  {
+    "name": "Tuum",
+    "hq": "Tallinn, EE",
+    "product": "Modular Core Banking",
+    "cloud": "AWS (Qualified), Cloud Agnostic",
+    "url": "tuum.com"
+  },
+  {
+    "name": "Ondato",
+    "hq": "London, UK / Vilnius, LT",
+    "product": "KYC & AML Compliance Platform",
+    "cloud": "SaaS (Cloud Agnostic)",
+    "url": "ondato.com"
+  },
+  {
+    "name": "Quantexa",
+    "hq": "London, UK",
+    "product": "Decision Intelligence (Fraud/KYC)",
+    "cloud": "GCP (Partner of Year), Azure, AWS",
+    "url": "quantexa.com"
+  },
+  {
+    "name": "ServiceNow",
+    "hq": "Santa Clara, US (EU Ops)",
+    "product": "Financial Services Operations (FSO)",
+    "cloud": "Azure (Strategic), AWS",
+    "url": "servicenow.com"
+  },
+  {
+    "name": "Infinity",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.infinity.co/"
+  },
+  {
+    "name": "Personetics",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://personetics.com/"
+  },
+  {
+    "name": "Strands",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://strands.com/"
+  },
+  {
+    "name": "Latinia",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://latinia.com/es/"
+  },
+  {
+    "name": "Comarch",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.comarch.com/finance/banking/"
+  },
+  {
+    "name": "Open Loyalty",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.openloyalty.io/"
+  },
+  {
+    "name": "Act-On",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://act-on.com/"
+  },
+  {
+    "name": "IDnow",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.idnow.io/"
+  },
+  {
+    "name": "Onfido, Entrust",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.entrust.com/"
+  },
+  {
+    "name": "Signicat",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.signicat.com/"
+  },
+  {
+    "name": "Sumsub",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://sumsub.com/"
+  },
+  {
+    "name": "Fenergo",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.fenergo.com/"
+  },
+  {
+    "name": "Meniga",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.meniga.com/"
+  },
+  {
+    "name": "Unblu",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.unblu.com/"
+  },
+  {
+    "name": "Veriff",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.veriff.com/"
+  },
+  {
+    "name": "Quadient",
+    "hq": "",
+    "product": "",
+    "cloud": "",
+    "url": "https://www.quadient.com/en-int/enterprise-industries/insurance"
+  },
+  {
+    "name": "LzLabs",
+    "hq": "Zurich, CH",
+    "product": "Software Defined Mainframe",
+    "cloud": "AWS, Azure, GCP",
+    "url": "lzlabs.com"
+  },
+  {
+    "name": "VirtualZ",
+    "hq": "Minneapolis, US (EU Ops)",
+    "product": "Mainframe Data Access",
+    "cloud": "GCP, Azure, AWS",
+    "url": "virtualzcomputing.com"
+  },
+  {
+    "name": "Micro Focus (OpenText)",
+    "hq": "Waterloo, CA (formerly UK)",
+    "product": "COBOL Modernization / Enterprise Server",
+    "cloud": "AWS, GCP, Azure",
+    "url": "microfocus.com"
+  }
+]
+
+NOTE: Also consider EMEA-based ISVs from Capital Markets, Risk & Compliance, and Insurance sub-verticals that may have Retail Banking-adjacent solutions. Cross-reference via live web search.
+
+ADDITIONAL WEB RESEARCH REQUIRED:
+- BIAN Retail Banking service domains and their mapping to operational value chain stages
+- Any EMEA-based Retail Banking ISVs NOT in the provided list (search for recent funding, Gartner/Forrester wave leaders)
+- Regulatory-specific ISVs for PSD3, Open Banking, GDPR, DORA compliance in EMEA

@@ -1,0 +1,24 @@
+[project]
+name = "deep-research-langgraph"
+version = "0.1.0"
+description = "A LangGraph-based deep research agent with multi-phase research, iterative refinement, and structured citations"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+dependencies = [
+    "langgraph>=0.4.0",
+    "langchain-community>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "pydantic>=2.0.0",
+    "duckduckgo_search>=8.0.0",
+    "httpx>=0.28.0",
+    "mcp>=1.0.0",
+]
+
+[project.scripts]
+deep-research = "app.cli:main"
+deep-research-mcp = "app.mcp_server:main"
+
+[tool.pytest.ini_options]
+pythonpath = [".."]
+asyncio_default_fixture_loop_scope = "function"
