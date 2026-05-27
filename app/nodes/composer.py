@@ -172,7 +172,29 @@ def composer_node(state: ResearchState) -> dict:
     # Pass 2: Replace citation tags with markdown links
     report_with_markdown = replace_citation_tags(report_with_tags, sources)
 
+    # ── State pruning: cap accumulators to prevent O(N²) checkpoint bloat ──
+    # Finding: LangGraph checkpoints grow quadratically with history length.
+    # A 200-turn agent can reach 5.3 GB. Capping lists prevents unbounded growth.
+    max_errors = 50
+    max_scores = 5
+    max_messages = 20
+    max_findings = 20
+
+    pruned_errors = state.get("errors", [])[-max_errors:]
+    pruned_scores = state.get("evaluation_scores", [])[-max_scores:]
+    pruned_messages = state.get("messages", [])[-max_messages:]
+    pruned_findings = state.get("parallel_findings", [])[-max_findings:]
+
+    if len(state.get("errors", [])) > max_errors:
+        logger.info("State pruned: errors %d→%d", len(state.get("errors", [])), max_errors)
+    if len(state.get("messages", [])) > max_messages:
+        logger.info("State pruned: messages %d→%d", len(state.get("messages", [])), max_messages)
+
     return {
         "final_cited_report": report_with_tags,
         "final_report_with_citations": report_with_markdown,
+        "messages": pruned_messages,
+        "errors": pruned_errors,
+        "evaluation_scores": pruned_scores,
+        "parallel_findings": pruned_findings,
     }

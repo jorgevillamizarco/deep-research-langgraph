@@ -72,6 +72,12 @@ hermes mcp add research --url http://localhost:8100/mcp
 
 Returns markdown report with citations, saved to `RESEARCH_OUTPUT_DIR`.
 
+## Production Notes
+
+- **State pruning:** Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5, parallel_findings: 20) to prevent O(N²) checkpoint bloat (5.3 GB observed at 200 turns).
+- **Checkpointing:** SQLite by default via `langgraph-checkpoint-sqlite`. Survives MCP server restarts.
+- **Circuit breaker:** Evaluator loop detects score stagnation across 2 iterations — forces pass to avoid wasted cycles.
+
 ## Related Skills
 
 Built with patterns now captured in reusable skills:
