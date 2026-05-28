@@ -76,26 +76,38 @@ and any question answerable with a single search.""",
             name="deep_research",
             description="""Run a deep, multi-phase research investigation on any topic.
 
-The agent will:
-1. Generate a structured research plan with 5 goals
-2. Execute parallel web searches via SearXNG/Google
-3. Synthesize findings into a comprehensive report
-4. Quality-check results with an iterative critique loop
-5. Return a fully cited markdown report
+HOW IT WORKS:
+1. Generates a structured research plan with [RESEARCH] and [DELIVERABLE] goals
+2. Executes N parallel web searches per goal via SearXNG
+3. Quality-checks findings with a numeric rubric (source_quality, claim_verification, completeness)
+4. If quality < threshold, runs follow-up searches to fill gaps
+5. Synthesizes everything into a fully cited markdown report with per-claim confidence levels
 
-Use this for: competitive analysis, market research, technical deep-dives,
-regulatory landscape reviews, vendor ecosystem mapping, and literature surveys.
-""",
+OUTPUT FORMAT:
+- Markdown report with inline citations as [Title](URL)
+- Executive Summary with overall confidence assessment (high/moderate/low)
+- Source Quality Assessment section (Tier 1/2/3 breakdown)
+- Cross-Cutting Themes with contradiction detection
+- Methodology section noting research process
+
+TOPIC GUIDANCE:
+- Be specific and contextual: "Compare LangGraph vs CrewAI for production multi-agent systems in 2026" works better than "AI agent frameworks"
+- Include time context if relevant (year, "current", "latest")
+- Mention specific angles you care about (performance, security, cost, ecosystem)
+
+USE FOR: competitive analysis, market research, technical deep-dives,
+regulatory reviews, vendor ecosystem mapping, literature surveys.
+NOT FOR: simple fact lookups (use search tool), real-time data (stock prices, weather).""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "topic": {
                         "type": "string",
-                        "description": "The research topic — be specific. Include context, constraints, and any reference data.",
+                        "description": "The research topic — be specific and contextual. Include time frame, angles, and constraints. Good: 'WebAssembly vs Docker for edge computing in 2026: performance, security, and ecosystem maturity'. Bad: 'wasm vs docker'.",
                     },
                     "max_iterations": {
                         "type": "integer",
-                        "description": "Max critique-refinement loops (default: 3). Higher = better quality but slower.",
+                        "description": "Max critique-refinement loops (default: 3, range: 1-5). Higher = better quality but slower and more expensive. Use 1-2 for quick overviews, 3-5 for deep analysis.",
                         "default": 3,
                     },
                 },
