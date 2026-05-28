@@ -25,9 +25,15 @@
 
 ### Better model defaults
 
-Both worker and critic default to DeepSeek V4 Flash. Stronger critic (Claude Sonnet, GPT-4) would catch more subtle quality issues.
+Both worker and critic default to DeepSeek V4 Flash. Stronger critic would catch more subtle issues.
 
-Fix: add `CRITIC_MODEL` to `.docker.env.template`, document in README, add validation warning if worker == critic.
+✅ Done: documented in `.docker.env.template` with recommendation to use stronger CRITIC_MODEL.
+
+### Streaming report output
+
+Progress markers show milestones but user can't watch the report form.
+
+✅ Done: composer now streams report to stdout token-by-token via `llm.stream()` with `flush=True`.
 
 ## Later — Big Features
 

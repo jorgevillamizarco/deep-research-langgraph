@@ -150,11 +150,17 @@ def composer_node(state: ResearchState) -> dict:
     8. Prefer Tier 1 sources for key claims; note when only Tier 3 sources are available."""
 
     try:
-        response = llm.invoke([
+        print("  📄 Generating report...", flush=True)
+        response_parts = []
+        for chunk in llm.stream([
             SystemMessage(content=system_prompt),
             HumanMessage(content=f"Produce the final research report for: {topic}"),
-        ])
-        report_with_tags = response.content.strip()
+        ]):
+            text = chunk.content if hasattr(chunk, "content") else str(chunk)
+            response_parts.append(text)
+            print(text, end="", flush=True)
+        report_with_tags = "".join(response_parts).strip()
+        print(flush=True)  # final newline
 
     except Exception as e:
         logger.error("Composer LLM call failed: %s", e)

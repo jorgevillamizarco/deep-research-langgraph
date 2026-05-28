@@ -35,6 +35,26 @@ class _TrackedChatOpenAI:
             pass
         return response
 
+    def stream(self, messages: list):
+        """Stream LLM output. Token tracking from final chunk metadata."""
+        full_content = []
+        last_meta = {}
+        for chunk in self._llm.stream(messages):
+            full_content.append(chunk.content if hasattr(chunk, "content") else str(chunk))
+            try:
+                meta = getattr(chunk, "response_metadata", {}) or {}
+                if meta:
+                    last_meta = meta
+            except Exception:
+                pass
+            yield chunk
+        # Track tokens from final chunk
+        try:
+            usage = last_meta.get("token_usage", {})
+            self._total_tokens += usage.get("total_tokens", 0)
+        except Exception:
+            pass
+
     def token_delta(self) -> dict:
         """Return state delta with accumulated tokens for operator.add reducer."""
         if self._total_tokens:
