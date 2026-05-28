@@ -1,5 +1,11 @@
 # Deep Research Agent — Project Context
 
+## Agent Instructions
+
+After every feature/fix: run tests → verify live endpoint → update all project docs (AGENTS.md, ARCHITECTURE.md, ROADMAP.md) → semantic commit → push.
+
+Important learnings (MCP patterns, LangGraph patterns, deployment patterns) must be retrofitted into Hermes skills so knowledge doesn't stay siloed in this repo.
+
 ## Architecture
 
 LangGraph StateGraph with 4 nodes + 1 subgraph (two-phase execution):
