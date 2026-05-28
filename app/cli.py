@@ -213,6 +213,7 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
         cached_count = 0
         fresh_goals = []
         if use_cache:
+            print(f"  💾 Cache mode: checking {len(parallel_goals)} goals...", flush=True)
             from app.cache import get_cached_goal, cache_goal, compute_avg_tier
             cached_findings_list = []
             cached_sources = {}

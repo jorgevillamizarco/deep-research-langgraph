@@ -52,10 +52,63 @@ def _get_conn() -> sqlite3.Connection:
     return conn
 
 
+def _normalize(text: str) -> str:
+    """Aggressively normalize goal text for comparison across LLM runs."""
+    import re
+    t = text.strip().lower()
+    t = re.sub(r'\*+', '', t)
+    t = re.sub(r'^\d+[\.\)]\s*', '', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def _key_phrase(text: str, words: int = 8) -> str:
+    """Extract first N words as the cache key — ignores LLM elaboration."""
+    return ' '.join(_normalize(text).split()[:words])
+
+
 def _hash_goal(goal_text: str) -> str:
-    """Hash a goal text for cache key. Normalized (lowercase, stripped)."""
-    normalized = goal_text.strip().lower()
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+    """Hash the key phrase (first 8 words) for cache lookup."""
+    return hashlib.sha256(_key_phrase(goal_text).encode()).hexdigest()[:16]
+
+
+def _similarity(a: str, b: str) -> float:
+    """Text similarity ratio for fuzzy goal matching."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, _key_phrase(a), _key_phrase(b)).ratio()
+
+
+def _find_cached_goal(goal_text: str) -> tuple[str, tuple] | None:
+    """Find a cached goal by exact hash or fuzzy match (similarity > 0.7)."""
+    goal_hash = _hash_goal(goal_text)
+    conn = _get_conn()
+    
+    # Exact match first
+    row = conn.execute(
+        "SELECT goal_hash, goal_text, findings, sources_json, researched_at, avg_source_tier "
+        "FROM goal_cache WHERE goal_hash = ?", (goal_hash,)
+    ).fetchone()
+    if row:
+        return ("exact", row)
+    
+    # Fuzzy match
+    all_rows = conn.execute(
+        "SELECT goal_hash, goal_text, findings, sources_json, researched_at, avg_source_tier "
+        "FROM goal_cache"
+    ).fetchall()
+    
+    best = None
+    best_sim = 0.0
+    for row in all_rows:
+        sim = _similarity(goal_text, row[1])
+        if sim > best_sim:
+            best_sim = sim
+            best = row
+    
+    if best and best_sim > 0.7:
+        return ("fuzzy", best)
+    
+    return None
 
 
 def _ttl_seconds(avg_tier: float) -> int:
@@ -109,24 +162,19 @@ def _delta_check(topic: str, goal_text: str, cached_sources: dict) -> bool:
 def get_cached_goal(goal_text: str, topic: str) -> dict | None:
     """Check cache for a goal. Returns findings dict or None.
     
+    Uses exact hash match first, then fuzzy text matching (>0.7 similarity).
     Validates TTL and runs delta check before serving.
     Always returns None (fresh research) for date-bound topics.
     """
     if _topic_is_date_bound(topic):
         return None
     
-    goal_hash = _hash_goal(goal_text)
-    conn = _get_conn()
-    row = conn.execute(
-        "SELECT goal_text, findings, sources_json, researched_at, avg_source_tier "
-        "FROM goal_cache WHERE goal_hash = ?",
-        (goal_hash,)
-    ).fetchone()
-    
-    if not row:
+    result = _find_cached_goal(goal_text)
+    if not result:
         return None
     
-    goal_text_db, findings, sources_json, researched_at, avg_tier = row
+    match_type, row = result
+    goal_hash_db, goal_text_db, findings, sources_json, researched_at, avg_tier = row
     
     # Check TTL
     try:
@@ -140,17 +188,21 @@ def get_cached_goal(goal_text: str, topic: str) -> dict | None:
                     int(age_seconds), _ttl_seconds(avg_tier), goal_text[:60])
         return None
     
-    # Delta check
-    try:
-        sources = json.loads(sources_json) if sources_json else {}
-    except json.JSONDecodeError:
-        sources = {}
-    
-    if not _delta_check(topic, goal_text, sources):
-        logger.info("Delta check FAILED for goal: %s", goal_text[:60])
-        return None
-    
-    logger.info("Cache HIT for goal (age=%ds): %s", int(age_seconds), goal_text[:60])
+    # Delta check — skip for very fresh cache (< 1 hour)
+    sources = {}
+    if age_seconds < 3600:
+        logger.info("Cache fresh (age=%ds, delta skipped): %s", int(age_seconds), goal_text[:60])
+    else:
+        try:
+            sources = json.loads(sources_json) if sources_json else {}
+        except json.JSONDecodeError:
+            sources = {}
+        if not _delta_check(topic, goal_text, sources):
+            logger.info("Delta check FAILED for goal: %s", goal_text[:60])
+            return None
+
+    match_label = "exact" if match_type == "exact" else f"fuzzy (sim={_similarity(goal_text, goal_text_db):.2f})"
+    logger.info("Cache HIT (%s) for goal (age=%ds): %s", match_label, int(age_seconds), goal_text[:60])
     return {
         "findings": findings,
         "sources": sources,
