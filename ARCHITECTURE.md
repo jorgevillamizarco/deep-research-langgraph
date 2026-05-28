@@ -334,6 +334,8 @@ Opt-in via `--cache` flag. Goal-level cache in SQLite (`research_cache.db`) with
 
 Cache lookup happens after plan generation. Cached findings pre-loaded into `parallel_findings` (operator.add reducer) — only uncached goals run through Phase 1 research. Fresh findings cached after graph completion.
 
+**Design note:** Hit rate is limited by LLM non-determinism — the planner generates different goal wordings each run. Key phrase hashing and fuzzy matching maximize hits within this constraint, but for a single-agent tool, fresh research is the right default. Semantic chunking would be over-engineering for marginal benefit.
+
 ## File Map
 
 ```

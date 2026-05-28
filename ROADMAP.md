@@ -39,7 +39,9 @@ Progress markers show milestones but user can't watch the report form.
 
 ### Cross-run memory
 
-✅ Implemented. Goal-level cache with aggressive TTL, delta validation, opt-in only.
+✅ Implemented. Goal-level cache with key phrase hashing, fuzzy matching, delta validation, opt-in only.
+
+**Lesson:** Cross-run caching has diminishing returns for single-agent research tools. Hit rate is fundamentally limited by LLM non-determinism — the planner generates different goal wordings each run. Semantic chunking + vector retrieval would add significant complexity for marginal benefit. Keep as lightweight opt-in bonus, not a core feature.
 
 **Design:**
 - `--cache` flag required (never enabled by default)
