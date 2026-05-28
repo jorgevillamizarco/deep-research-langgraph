@@ -226,20 +226,19 @@ async def _handle_deep_research(
     )
 
     try:
-        for event in graph.stream(initial_state, thread_config):
-            if isinstance(event, dict) and "__interrupt__" in event:
-                # Auto-resume (plan already approved)
-                from langgraph.types import Command
+        # Generate plan first (avoids double-entry from stream+resume)
+        from app.nodes.planner import generate_plan_only
 
-                final_values = graph.invoke(
-                    Command(resume={"plan_approved": True}), thread_config
-                )
-                break
+        plan_result = generate_plan_only(topic)
+        initial_state["research_plan"] = plan_result["research_plan"]
+        initial_state["report_sections"] = plan_result["report_sections"]
+        initial_state["parallel_goals"] = plan_result["parallel_goals"]
+        initial_state["plan_approved"] = True
+        if plan_result.get("total_tokens"):
+            initial_state["total_tokens"] = plan_result["total_tokens"]
 
-        else:
-            # No interrupt — graph completed normally
-            final_state = graph.get_state(thread_config)
-            final_values = final_state.values
+        # Run graph with approved plan (single invoke, no interrupt)
+        final_values = graph.invoke(initial_state, thread_config)
 
         report = (
             final_values.get("final_report_with_citations")

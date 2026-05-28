@@ -19,8 +19,6 @@ import sys
 import time
 from pathlib import Path
 
-from langgraph.types import Command
-
 from app.agent import build_research_graph
 from app.config import config
 
@@ -169,72 +167,51 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
 
     final_state = None
     try:
-        # ── Phase 1: Stream until the plan-review interrupt ──
-        for event in graph.stream(initial_state, thread_config):
-            if isinstance(event, dict) and "__interrupt__" in event:
-                raw = event["__interrupt__"]
+        # ── Phase 0: Generate plan (separate from graph, no interrupt) ──
+        from app.nodes.planner import generate_plan_only
 
-                # Navigate LangGraph's interrupt wrapping
-                if isinstance(raw, (list, tuple)) and raw:
-                    payload = raw[0]
-                    payload = getattr(payload, "value", payload)
-                else:
-                    payload = raw
+        plan_result = generate_plan_only(topic)
+        plan_text = plan_result["research_plan"]
+        sections_text = plan_result["report_sections"]
+        parallel_goals = plan_result["parallel_goals"]
+        total_tokens_val = plan_result.get("total_tokens", 0)
 
-                plan = (payload or {}).get("research_plan", "")
-                sections = (payload or {}).get("report_sections", "")
+        # Interactive: show plan, get approval/feedback (loop until approved)
+        while not auto_approve:
+            _display_plan(plan_text, sections_text)
+            print("  Options:")
+            print("    yes       — Approve plan and start research")
+            print("    <text>    — Provide feedback to refine the plan")
+            print("    abort     — Cancel")
+            choice = input("  > ").strip().lower()
 
-                if not auto_approve:
-                    _display_plan(plan, sections)
+            if choice == "yes":
+                break
+            elif choice == "abort":
+                print("\n  [Research aborted]")
+                return ""
+            else:
+                print(f"\n  [Feedback received — regenerating plan...]\n")
+                plan_result = generate_plan_only(topic, previous_plan=plan_text, user_feedback=choice)
+                plan_text = plan_result["research_plan"]
+                sections_text = plan_result["report_sections"]
+                parallel_goals = plan_result["parallel_goals"]
+                total_tokens_val += plan_result.get("total_tokens", 0)
 
-                if auto_approve:
-                    resume_value = {
-                        "plan_approved": True,
-                        "research_plan": plan,
-                        "report_sections": sections,
-                    }
-                else:
-                    print("  Options:")
-                    print("    yes       — Approve plan and start research")
-                    print("    <text>    — Provide feedback to refine the plan")
-                    print("    abort     — Cancel")
-                    choice = input("  > ").strip().lower()
+        # ── Phase 1-3: Run graph with approved plan ──
+        initial_state["research_plan"] = plan_text
+        initial_state["report_sections"] = sections_text
+        initial_state["parallel_goals"] = parallel_goals
+        initial_state["plan_approved"] = True
+        initial_state["total_tokens"] = total_tokens_val
 
-                    if choice == "yes":
-                        resume_value = {"plan_approved": True}
-                        print("\n  [Plan approved — starting research...]\n")
-                    elif choice == "abort":
-                        print("\n  [Research aborted]")
-                        return ""
-                    else:
-                        resume_value = {"user_feedback": choice}
-                        print(f"\n  [Feedback received — regenerating plan...]\n")
-
-                # ── Phase 2: Resume with invoke (blocking, runs to completion) ──
-                final_values = graph.invoke(Command(resume=resume_value), thread_config)
-
-                # If feedback was given, the planner loops back to the interrupt.
-                # Continue the outer for-loop to catch the new interrupt.
-                if not resume_value.get("plan_approved"):
-                    continue
-
-                # Plan approved — final_values contains the final state
-                final_state = final_values
-                report = (
-                    final_values.get("final_report_with_citations")
-                    or final_values.get("final_cited_report")
-                    or ""
-                )
-                break  # Exit the event loop
-
-        else:
-            # No interrupt fired: the graph may have completed without a stop
-            final_state = graph.get_state(thread_config)
-            report = (
-                final_state.values.get("final_report_with_citations")
-                or final_state.values.get("final_cited_report")
-                or ""
-            )
+        final_values = graph.invoke(initial_state, thread_config)
+        final_state = final_values
+        report = (
+            final_values.get("final_report_with_citations")
+            or final_values.get("final_cited_report")
+            or ""
+        )
 
         # ── Report result ──
         if not report:

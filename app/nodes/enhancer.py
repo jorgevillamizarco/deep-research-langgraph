@@ -22,13 +22,9 @@ logger = logging.getLogger(__name__)
 
 def _get_llm() -> Any:
     """Get the chat model for enhancement."""
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=config.worker_model,
-        temperature=0.2,
-        api_key=config.worker_api_key or None,
-        base_url=config.worker_api_base or None,
-    )
+    from app.tokens import get_llm
+    return get_llm(model=config.worker_model, api_key=config.worker_api_key or None,
+                   base_url=config.worker_api_base or None, temperature=0.2)
 
 
 def enhanced_search_executor_node(state: ResearchState) -> dict:
@@ -126,4 +122,5 @@ Cite sources with markdown links."""
         "sources": merged_sources,
         "url_to_short_id": merged_url_map,
         "iteration_count": state.get("iteration_count", 0) + 1,
+        **llm.token_delta(),
     }

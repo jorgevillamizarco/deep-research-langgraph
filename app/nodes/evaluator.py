@@ -42,13 +42,10 @@ def _extract_scores(comment: str, iteration: int) -> dict | None:
 
 def _get_llm() -> Any:
     """Get the chat model for evaluation."""
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=config.critic_model,
-        temperature=0.1,
-        api_key=config.critic_api_key or config.worker_api_key or None,
-        base_url=config.critic_api_base or config.worker_api_base or None,
-    )
+    from app.tokens import get_llm
+    return get_llm(model=config.critic_model, temperature=0.1,
+                   api_key=config.critic_api_key or config.worker_api_key or None,
+                   base_url=config.critic_api_base or config.worker_api_base or None)
 
 
 def _parse_feedback_json(text: str) -> Feedback | None:
@@ -182,6 +179,7 @@ follow_up_queries MUST be null/empty if grade is "pass"."""
             return {
                 "research_evaluation": evaluation,
                 "evaluation_scores": [scores_entry] if scores_entry else [],
+                **llm.token_delta(),
             }
         else:
             # Fallback: return a fail with generic comment

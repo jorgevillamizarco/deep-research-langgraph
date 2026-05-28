@@ -210,6 +210,7 @@ def researcher_node(state: ResearchState) -> dict:
         "sources": merged_sources,
         "url_to_short_id": merged_url_map,
         "research_iteration": state.get("research_iteration", 0) + 1,
+        **llm.token_delta(),
     }
 
 
@@ -295,4 +296,5 @@ TAG EVERY CLAIM. If sources conflict, note the discrepancy explicitly."""
         "section_research_findings": merged,
         "sources": {**state.get("sources", {}), **new_sources},
         "url_to_short_id": {**state.get("url_to_short_id", {}), **new_url_map},
+        **llm.token_delta(),
     }

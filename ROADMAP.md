@@ -15,29 +15,13 @@
 - [x] Flexible report structure (planner sections as template)
 - [x] Multi-model support (separate worker/critic via env vars)
 - [x] Token tracking infrastructure (state field + shared get_llm)
+- [x] Token tracking wired (all nodes report tokens via _TrackedChatOpenAI wrapper)
+- [x] Planner double-entry fixed (two-pass: generate plan separately, graph runs once)
 - [x] MCP server (SSE + JSON-RPC POST handler)
 - [x] Docker deployment (agent + SearXNG, one-command deploy)
 - [x] Comprehensive docs (ARCHITECTURE.md, AGENTS.md, skills)
 
 ## Next — Polish
-
-### Wire token tracking
-
-`total_tokens` state field and `get_llm()` factory exist. Per-node accumulation not wired — reports show 0 tokens.
-
-Fix: wrap `llm.invoke()` with token extraction in shared `get_llm()`, add `**token_delta(response)` to each node's return dict.
-
-### Fix planner double-entry on auto-approve
-
-`graph.stream()` interrupt + `graph.invoke(Command(resume=...))` causes planner to re-enter from entry point. Plan passed through resume value as workaround, but one extra LLM call wasted.
-
-Fix: investigate LangGraph checkpoint behavior with stream+invoke. May need `graph.get_state()` + manual state reconstruction.
-
-### Streaming report output
-
-Progress markers show milestones but user can't watch the report form. 3-minute silences between markers.
-
-Fix: stream composer output as it generates (break into sections, yield per section). Or add intermediate summaries after each phase.
 
 ### Better model defaults
 

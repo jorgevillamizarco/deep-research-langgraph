@@ -32,18 +32,17 @@ logger = logging.getLogger(__name__)
 
 def _get_llm() -> Any:
     """Get the chat model for planning (uses worker_model from config)."""
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=config.worker_model,
-        temperature=0.1,
-        api_key=config.worker_api_key or None,
-        base_url=config.worker_api_base or None,
-    )
+    from app.tokens import get_llm
+    return get_llm(model=config.worker_model, temperature=0.1,
+                   api_key=config.worker_api_key or None,
+                   base_url=config.worker_api_base or None)
 
 
-def _generate_plan(topic: str, previous_plan: str | None, user_feedback: str | None) -> str:
+def _generate_plan(topic: str, previous_plan: str | None, user_feedback: str | None,
+                   llm: Any | None = None) -> str:
     """Call the LLM to generate or refine a research plan."""
-    llm = _get_llm()
+    if llm is None:
+        llm = _get_llm()
     today = datetime.datetime.now().strftime("%Y-%m-%d")
 
     if previous_plan and user_feedback:
@@ -66,9 +65,10 @@ Current date: {today}"""
     return response.content.strip()
 
 
-def _generate_sections(plan: str) -> str:
+def _generate_sections(plan: str, llm: Any | None = None) -> str:
     """Call the LLM to produce a markdown report outline from the plan."""
-    llm = _get_llm()
+    if llm is None:
+        llm = _get_llm()
     system_prompt = "You are an expert report architect. Create a markdown outline with 4-6 distinct sections. Do NOT include References or Sources."
     response = llm.invoke([SystemMessage(content=system_prompt), HumanMessage(content=f"Research Plan:\n{plan}")])
     return response.content.strip()
@@ -101,8 +101,9 @@ def planner_node(state: ResearchState) -> dict:
         logger.info("Plan approved on resume — regenerating with same prompt")
         # Fall through to regenerate — prompt includes DELIVERABLE mandate
 
-    plan = _generate_plan(topic, previous_plan, user_feedback)
-    sections = _generate_sections(plan)
+    llm = _get_llm()
+    plan = _generate_plan(topic, previous_plan, user_feedback, llm=llm)
+    sections = _generate_sections(plan, llm=llm)
     goals = _extract_research_goals(plan)
 
     # Guarantee at least one DELIVERABLE goal
@@ -138,6 +139,7 @@ def planner_node(state: ResearchState) -> dict:
                 "plan_approved": True,
                 "user_feedback": None,
                 "parallel_goals": goals,
+                **llm.token_delta(),
             }
         elif resume_value.get("user_feedback"):
             feedback = resume_value["user_feedback"]
@@ -148,6 +150,7 @@ def planner_node(state: ResearchState) -> dict:
                 "plan_approved": False,
                 "user_feedback": feedback,
                 "parallel_goals": goals,
+                **llm.token_delta(),
             }
 
     return {
@@ -156,4 +159,35 @@ def planner_node(state: ResearchState) -> dict:
         "plan_approved": False,
         "user_feedback": None,
         "parallel_goals": goals,
+        **llm.token_delta(),
+    }
+
+
+def generate_plan_only(topic: str, previous_plan: str | None = None,
+                       user_feedback: str | None = None) -> dict:
+    """Generate a research plan without graph/interrupt. For two-pass CLI flow.
+
+    Returns dict with research_plan, report_sections, parallel_goals.
+    No graph needed — direct LLM calls only.
+    """
+    llm = _get_llm()
+    plan = _generate_plan(topic, previous_plan, user_feedback, llm=llm)
+    sections = _generate_sections(plan, llm=llm)
+
+    # Guarantee at least one DELIVERABLE goal
+    if "[DELIVERABLE]" not in plan:
+        plan += (
+            "\n[DELIVERABLE] Synthesize all findings into a structured summary "
+            "with key takeaways, ranked recommendations, and a decision matrix "
+            "where applicable."
+        )
+
+    goals = _extract_research_goals(plan)
+    logger.info("Plan generated: %d chars, %d sections, %d research goals", len(plan), len(sections), len(goals))
+
+    return {
+        "research_plan": plan,
+        "report_sections": sections,
+        "parallel_goals": goals,
+        **llm.token_delta(),
     }

@@ -23,13 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def _get_llm() -> Any:
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=config.critic_model,
-        temperature=0.2,
-        api_key=config.critic_api_key or config.worker_api_key or None,
-        base_url=config.critic_api_base or config.worker_api_base or None,
-    )
+    from app.tokens import get_llm
+    return get_llm(model=config.critic_model, temperature=0.2,
+                   api_key=config.critic_api_key or config.worker_api_key or None,
+                   base_url=config.critic_api_base or config.worker_api_base or None)
 
 
 def _serialize_sources(sources: dict) -> str:
@@ -197,4 +194,5 @@ def composer_node(state: ResearchState) -> dict:
         "errors": pruned_errors,
         "evaluation_scores": pruned_scores,
         "parallel_findings": pruned_findings,
+        **llm.token_delta(),
     }
