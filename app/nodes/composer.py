@@ -74,6 +74,11 @@ def composer_node(state: ResearchState) -> dict:
         error_list = "\n".join(f"  - {e}" for e in errors)
         errors_note = f"\nNON-FATAL ERRORS encountered during research (note in Methodology):\n{error_list}\n"
 
+    cache_note = ""
+    cached_count = state.get("cached_goal_count", 0)
+    if cached_count:
+        cache_note = f"\n{cached_count} research goal(s) were served from cross-run cache (delta-validated, within TTL). Note in Methodology.\n"
+
     scores_note = ""
     if scores:
         last = scores[-1]
@@ -98,6 +103,7 @@ def composer_node(state: ResearchState) -> dict:
     {eval_note}
     {scores_note}
     {errors_note}
+    {cache_note}
     - Topic: {topic}
 
     SOURCE QUALITY TIERS (for internal quality weighting — do NOT annotate citations with tiers):
@@ -137,7 +143,7 @@ def composer_node(state: ResearchState) -> dict:
     ## Methodology
     [Brief note on how the research was conducted: web search, iterative refinement, etc.
      If NON-FATAL ERRORS were reported, note them here. If scores improved across iterations,
-     mention the refinement process.]
+     mention the refinement process. If goals were served from cross-run cache, note it here.]
 
     COMPOSITION RULES:
     1. Every factual claim must have an inline citation tag.

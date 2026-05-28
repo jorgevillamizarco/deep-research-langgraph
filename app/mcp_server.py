@@ -211,6 +211,7 @@ async def _handle_deep_research(
         "errors": [],
         "evaluation_scores": [],
         "total_tokens": 0,
+        "cached_goal_count": 0,
     }
 
     import time

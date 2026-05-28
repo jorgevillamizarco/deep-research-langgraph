@@ -39,36 +39,16 @@ Progress markers show milestones but user can't watch the report form.
 
 ### Cross-run memory
 
-Goal-level cache in SQLite to avoid re-researching the same goals across runs.
+✅ Implemented. Goal-level cache with aggressive TTL, delta validation, opt-in only.
 
 **Design:**
-
-```
-Cache lookup per RESEARCH goal:
-  1. Hash goal text
-  2. If topic contains \d{4}: skip (date-bound research, never cache)
-  3. If --fresh flag: skip
-  4. Look up by goal_hash in SQLite
-  5. If not found → research fresh, cache
-  6. If found but expired (TTL based on avg_source_tier) → research fresh
-  7. If found and fresh → run 1 delta search for "topic + latest"
-  8. If delta shows substantially new results → research fresh
-  9. If delta clean → return cached findings
-```
-
-**Cache entry:** `{goal_hash, findings, sources, researched_at, avg_source_tier, youngest_source_date}`
-
-**TTL by source tier:**
-| Avg tier | TTL |
-|----------|-----|
-| ≤1.5 (mostly academic/official) | 6 months |
-| 1.5-2.5 (mixed) | 3 months |
-| >2.5 (mostly community/news) | 1 month |
-
-**Not building (yet):**
-- Semantic similarity matching (fuzzy, v2)
-- Source-level cache (per-URL staleness is complex)
-- Auto-invalidation (no heuristic beats `--fresh`)
+- `--cache` flag required (never enabled by default)
+- Cache key: SHA256 of normalized goal text
+- TTL by source tier: 2 weeks (T1), 1 week (T2), 2 days (T3)
+- Date-bound topics (contain year) never cached
+- Delta check runs 1 lightweight search before serving
+- Transparent: Methodology section notes cached goals
+- Cache file: `research_cache.db` alongside checkpoints
 
 ### Streaming report generation
 

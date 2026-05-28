@@ -113,48 +113,52 @@ th{{background:#f5f5f5}}</style></head><body>
     return None
 
 
-def run_research(topic: str, auto_approve: bool = False) -> str:
+def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False) -> str:
     """Execute full deep research workflow from the command line.
 
     Flow:
-      1. Stream the graph to generate the plan → hits an interrupt for review
-      2. Display plan, ask for user approval/feedback
-      3. Resume with ``graph.invoke(Command(resume=...))`` — runs the rest
-         of the pipeline (research → evaluation → composer)
+      1. Generate plan (direct LLM, no graph)
+      2. Optional: check cross-run cache for reusable goal findings
+      3. Run graph with approved plan + pre-loaded cached findings
       4. Save and return the final report (markdown + PDF)
 
     Args:
         topic: The research topic.
         auto_approve: If True, skip the plan review and execute immediately.
+        use_cache: If True, check goal-level cache for reusable findings.
 
     Returns:
         The final report text.
     """
-    graph = build_research_graph()
 
-    initial_state = {
-        "topic": topic,
-        "plan_approved": False,
-        "user_feedback": None,
-        "research_plan": None,
-        "report_sections": None,
-        "section_research_findings": None,
-        "research_evaluation": None,
-        "current_goal": "",
-        "parallel_goals": [],
-        "parallel_findings": [],
-        "research_iteration": 0,
-        "iteration_count": 0,
-        "max_iterations": config.max_search_iterations,
-        "url_to_short_id": {},
-        "sources": {},
-        "final_cited_report": None,
-        "final_report_with_citations": None,
-        "messages": [],
-        "errors": [],
-        "evaluation_scores": [],
-        "total_tokens": 0,
-    }
+    def _state() -> dict:
+        return {
+            "topic": topic,
+            "plan_approved": False,
+            "user_feedback": None,
+            "research_plan": None,
+            "report_sections": None,
+            "section_research_findings": None,
+            "research_evaluation": None,
+            "current_goal": "",
+            "parallel_goals": [],
+            "parallel_findings": [],
+            "research_iteration": 0,
+            "iteration_count": 0,
+            "max_iterations": config.max_search_iterations,
+            "url_to_short_id": {},
+            "sources": {},
+            "final_cited_report": None,
+            "final_report_with_citations": None,
+            "messages": [],
+            "errors": [],
+            "evaluation_scores": [],
+            "total_tokens": 0,
+            "cached_goal_count": 0,
+        }
+
+    initial_state = _state()
+    graph = build_research_graph()
 
     thread_id = f"research-{int(time.time())}"
     thread_config = {"configurable": {"thread_id": thread_id}}
@@ -205,6 +209,32 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
         initial_state["plan_approved"] = True
         initial_state["total_tokens"] = total_tokens_val
 
+        # ── Cross-run cache (--cache flag) ──
+        cached_count = 0
+        fresh_goals = []
+        if use_cache:
+            from app.cache import get_cached_goal, cache_goal, compute_avg_tier
+            cached_findings_list = []
+            cached_sources = {}
+            for goal in parallel_goals:
+                cached = get_cached_goal(goal, topic)
+                if cached:
+                    cached_findings_list.append(f"### Research: {goal}\n\n{cached['findings']}")
+                    cached_sources.update(cached.get("sources", {}))
+                    cached_count += 1
+                    print(f"  💾 Cache hit: {goal[:60]}...", flush=True)
+                else:
+                    fresh_goals.append(goal)
+            if cached_count:
+                initial_state["parallel_goals"] = fresh_goals
+                initial_state["parallel_findings"] = cached_findings_list
+                initial_state["sources"] = {**initial_state["sources"], **cached_sources}
+                initial_state["cached_goal_count"] = cached_count
+                remaining = len(fresh_goals)
+                print(f"  💾 {cached_count} cached, {remaining} fresh goals", flush=True)
+        else:
+            fresh_goals = parallel_goals
+
         final_values = graph.invoke(initial_state, thread_config)
         final_state = final_values
         report = (
@@ -212,6 +242,17 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
             or final_values.get("final_cited_report")
             or ""
         )
+
+        # ── Cache fresh findings for future runs ──
+        if use_cache and fresh_goals:
+            from app.cache import cache_goal, compute_avg_tier
+            findings_text = final_state.get("section_research_findings", "")
+            final_sources = final_state.get("sources", {})
+            avg_tier = compute_avg_tier(final_sources)
+            # Cache each fresh goal's contribution
+            for goal_text in fresh_goals:
+                cache_goal(goal_text, findings_text, final_sources, avg_tier)
+            print(f"  💾 Cached {len(fresh_goals)} fresh goals for future runs", flush=True)
 
         # ── Report result ──
         if not report:
@@ -259,6 +300,9 @@ def run_research(topic: str, auto_approve: bool = False) -> str:
                     print(f"  Tokens:   {total_tokens_val:,}")
         except Exception:
             pass  # Token reporting is non-critical
+        cached_count_val = final_state.get("cached_goal_count", 0) if final_state else 0
+        if cached_count_val:
+            print(f"  Cache:    {cached_count_val} goals from cache")
         print()
         for line in report.split("\n")[:20]:
             print(f"  {line}")
@@ -299,6 +343,11 @@ def main() -> None:
         help="Auto-approve the research plan (skip interrupt)",
     )
     parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="Use cross-run goal cache (aggressive TTL, delta-validated, opt-in)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable debug logging",
@@ -319,7 +368,7 @@ def main() -> None:
         print("\nError: Provide a research topic or --topic-file")
         sys.exit(1)
 
-    run_research(topic, auto_approve=args.auto)
+    run_research(topic, auto_approve=args.auto, use_cache=args.cache)
 
 
 if __name__ == "__main__":
