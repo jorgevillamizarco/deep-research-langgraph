@@ -89,6 +89,7 @@ Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 | **SQLite checkpointing** | Survives MCP server restarts, zero-config |
 | **Graceful save** | Report prints to stdout even if file write fails |
 | **DELIVERABLE failsafe** | Prompt mandate + post-processing append + regex failsafe — Phase 2 always executes |
+| **Cross-run cache** | Opt-in via `--cache`. Goal-level with aggressive TTL (2d-2wk), delta-validated, date-bound topics never cached |
 | **PDF generation** | Automatic pandoc+weasyprint output alongside markdown |
 | **Token tracking** | `total_tokens` state field with `operator.add` reducer |
 | **Error surface** | Non-fatal errors + evaluation scores in Methodology section |

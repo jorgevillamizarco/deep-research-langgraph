@@ -320,6 +320,20 @@ Separate models for research (worker) and evaluation (critic) via environment:
 
 Use a stronger model for critic (Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
 
+### Cross-Run Cache
+
+Opt-in via `--cache` flag. Goal-level cache in SQLite (`research_cache.db`) with aggressive freshness guarantees:
+
+| Protection | How |
+|------------|-----|
+| **Opt-in only** | `--cache` flag required. Default: fresh research |
+| **Aggressive TTL** | 2 weeks (T1), 1 week (T2), 2 days (T3) |
+| **Date detection** | Topics containing a year (e.g., "2026") never cached |
+| **Delta check** | One lightweight search validates before serving cached findings |
+| **Transparent** | Methodology section notes cached goals |
+
+Cache lookup happens after plan generation. Cached findings pre-loaded into `parallel_findings` (operator.add reducer) — only uncached goals run through Phase 1 research. Fresh findings cached after graph completion.
+
 ## File Map
 
 ```
@@ -339,7 +353,8 @@ deep-research-langgraph/
 │   └── tools/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
 │       ├── citations.py      # URL extraction, tier annotation, tag replacement
-│       └── tokens.py         # Shared LLM factory + token tracking
+│       ├── tokens.py         # Shared LLM factory + token tracking
+│       └── cache.py          # Cross-run goal cache (TTL + delta check)
 ├── tests/
 │   └── test_agent.py         # 8 unit tests
 ├── Dockerfile
