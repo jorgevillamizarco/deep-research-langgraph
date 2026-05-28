@@ -68,7 +68,9 @@ hermes mcp add research --url http://localhost:8100/mcp
 
 **Multi-model support:** Set `WORKER_MODEL` for research/composition tasks and `CRITIC_MODEL` for evaluation. Use a stronger model for the critic (e.g., Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
 
-## MCP Tool: `deep_research`
+## MCP Tools
+
+### `deep_research` — Full research pipeline
 
 ```json
 {
@@ -78,6 +80,21 @@ hermes mcp add research --url http://localhost:8100/mcp
 ```
 
 Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
+
+### `search` — Quick web search
+
+```json
+{
+  "query": "string (required)",
+  "max_results": "integer (optional, default 5, max 15)"
+}
+```
+
+Returns markdown-formatted search results with titles, URLs, and snippets.
+
+### `outputSchema`
+
+Both tools declare `outputSchema` so MCP clients (LLMs) know the exact report structure before calling: sections (executive_summary, source_quality_assessment, cross_cutting_themes, research_findings, methodology), features (per-claim confidence, source tiers, contradiction detection, quantitative data), and delivery metadata (markdown_path, pdf_path, char_count). Follows MCP spec best practices.
 
 ## Production Features
 
@@ -94,6 +111,7 @@ Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 | **Token tracking** | `total_tokens` state field with `operator.add` reducer |
 | **Error surface** | Non-fatal errors + evaluation scores in Methodology section |
 | **Flexible structure** | Composer uses planner's section outline as primary template |
+| **Self-documenting tools** | MCP tools declare `outputSchema` so LLMs know report structure, sections, features, and delivery without calling |
 
 ## Quality Pipeline
 

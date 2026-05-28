@@ -20,6 +20,7 @@
 - [x] MCP server (SSE + JSON-RPC POST handler)
 - [x] Docker deployment (agent + SearXNG, one-command deploy)
 - [x] Comprehensive docs (ARCHITECTURE.md, AGENTS.md, skills)
+- [x] Self-documenting MCP tools (outputSchema on search + deep_research, rich tool descriptions with examples)
 
 ## Next — Polish
 
