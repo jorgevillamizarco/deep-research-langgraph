@@ -50,7 +50,9 @@ Architectural concerns from code review (May 2026). Not blockers — the agent i
 
 ✅ **PARTIALLY RESOLVED** (May 2026). Added `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable`, `ConfidenceTag`, and `ResearchOutput` Pydantic models. `_research_single_goal()` now returns a typed `ResearchFinding` with pre-extracted citations, preventing the parallel citation loss bug at the type level.
 
-**Remaining:** `parallel_findings` state field is still `list[str]` for LangGraph TypedDict compatibility. Full migration to typed models between all nodes requires a larger refactor of the state schema.
+**Type-safe accessors added (May 2026):** `findings_from_state()`, `findings_to_state()`, `get_typed_sources()` — typed wrappers around string-based LangGraph state. Parse and serialize findings without regex. Citation extraction at the type level.
+
+**Remaining:** `parallel_findings` state field is still `list[str]` for LangGraph TypedDict compatibility with `operator.add` reducer. Full migration to typed models between all nodes requires custom reducers. The accessors provide the migration path.
 
 ### 3. Evaluator Reliability
 
@@ -169,7 +171,7 @@ Multiple research agents collaborating on a large topic. Planner distributes sub
 
 | Skill | Content |
 |-------|---------|
-| `deep-research-langgraph-agent` | 17 production patterns: two-phase execution, 3-layer LLM constraints, Send API fan-out with citation extraction, subgraph refinement, numeric rubric evaluator, 5-stage citations, state pruning, circuit breaker, two-pass plan approval, SqliteSaver fallback, writable directory chain, progress tracking, MCP async patterns, composer serialization bloat fix, rule-based evaluator pre-check, PDF opt-in pattern, SSE streaming for MCP |
+| `deep-research-langgraph-agent` | 23 production patterns: [existing ones], LLM fallback chain, env var validation, per-node tokens, browser-based research, type-safe state accessors |
 | `langgraph-agent-patterns` | StateGraph, Send API, subgraphs, interrupt/resume, checkpointing, JSON prompting, DELIVERABLE guarantee, circuit breaker, state pruning, progress markers, token tracking |
 | `langgraph-agent-deployment/references/architecture-patterns.md` | Two-phase execution, refinement subgraph, Send API fan-out, circuit breaker, state pruning, progress markers, token tracking, auto-approve pattern |
 | `langgraph-agent-deployment/references/quality-patterns.md` | Numeric rubric, per-claim confidence, source tiers, contradiction detection, DELIVERABLE guarantee, error surface |

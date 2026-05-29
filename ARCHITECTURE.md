@@ -379,7 +379,7 @@ deep-research-langgraph/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
 │       └── citations.py      # URL extraction, tier annotation, tag replacement
 ├── tests/
-│   ├── test_agent.py         # 19 unit tests
+│   ├── test_agent.py         # 25 unit tests (config, evaluator, citations, models)
 │   └── test_integration.py   # 4 E2E scenarios (happy path, enhancer loop, circuit breaker, brief mode)
 ├── Dockerfile
 ├── docker-compose.yml
