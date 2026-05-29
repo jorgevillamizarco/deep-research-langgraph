@@ -30,6 +30,7 @@ class ResearchConfig:
     critic_api_key: str = os.getenv("CRITIC_API_KEY", "")
     critic_api_base: str = os.getenv("CRITIC_API_BASE", "")
     output_dir: str = os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research/agent-results"))
+    enable_evaluator: bool = os.getenv("ENABLE_EVALUATOR", "true").lower() not in ("false", "0", "no", "")
 
 
 config = ResearchConfig()

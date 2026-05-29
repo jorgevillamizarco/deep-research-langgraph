@@ -101,11 +101,79 @@ def _parse_feedback_json(text: str) -> Feedback | None:
     )
 
 
+def _rule_based_evaluation(findings: str, topic: str) -> Feedback | None:
+    """Quick heuristic evaluation to skip LLM call for obvious pass/fail cases.
+
+    Returns PASS or FAIL feedback if findings are clearly good/bad.
+    Returns None if ambiguous — fall through to LLM evaluator.
+
+    Heuristics (tuned to be conservative — when in doubt, let LLM decide):
+    - CLEAR FAIL: 0 URLs, <200 chars, or contains error keywords
+    - CLEAR PASS: 3+ URLs, 1+ numbers/dates, structured sections, >1000 chars
+    - AMBIGUOUS: everything else
+    """
+    if not findings or len(findings) < 200:
+        return Feedback(
+            grade="fail",
+            comment="Rule-based pre-check: findings too short (<200 chars). Scores: source_quality=1/5, claim_verification=1/5, completeness=1/5. Insufficient content for evaluation.",
+            follow_up_queries=[
+                SearchQuery(search_query=f"{topic} comprehensive overview"),
+                SearchQuery(search_query=f"{topic} recent developments"),
+                SearchQuery(search_query=f"{topic} key statistics data"),
+            ],
+        )
+
+    # Count URLs
+    urls = re.findall(r"https?://[^\s\)\"\'>]+", findings)
+    url_count = len(urls)
+
+    # Check for numbers/dates (quantitative data)
+    has_numbers = bool(re.search(r"\b\d{1,3}(,\d{3})*(\.\d+)?\b", findings))  # numbers
+    has_dates = bool(re.search(r"\b20\d{2}\b", findings))  # years 2000-2099
+    has_percentages = bool(re.search(r"\d+%", findings))
+    has_quantitative = has_numbers or has_dates or has_percentages
+
+    # Check for structure (## headers indicate sections)
+    has_structure = bool(re.search(r"^##?\s+\w", findings, re.MULTILINE))
+
+    # Check for error keywords
+    error_keywords = ["failed", "no results", "error", "could not", "unable to", "search failed"]
+    has_errors = any(kw in findings.lower() for kw in error_keywords)
+
+    # CLEAR FAIL: no URLs, or has explicit errors, or very short
+    if url_count == 0 or has_errors:
+        follow_ups = [
+            SearchQuery(search_query=f"{topic} authoritative sources"),
+            SearchQuery(search_query=f"{topic} official documentation"),
+            SearchQuery(search_query=f"{topic} research paper"),
+            SearchQuery(search_query=f"{topic} statistics data"),
+        ]
+        return Feedback(
+            grade="fail",
+            comment=f"Rule-based pre-check: {'no citations found' if url_count == 0 else 'errors detected in findings'}. Scores: source_quality=1/5, claim_verification=2/5, completeness=2/5. Needs re-research.",
+            follow_up_queries=follow_ups,
+        )
+
+    # CLEAR PASS: substantial, structured, cited, quantitative
+    if url_count >= 3 and has_quantitative and has_structure and len(findings) > 400:
+        return Feedback(
+            grade="pass",
+            comment=f"Rule-based pre-check: {url_count} citations, structured sections, quantitative data, substantial length. Scores: source_quality=4/5, claim_verification=4/5, completeness=4/5. Meets threshold without LLM evaluation.",
+            follow_up_queries=None,
+        )
+
+    # Ambiguous — fall through to LLM
+    return None
+
+
 def research_evaluator_node(state: ResearchState) -> dict:
-    """Critique the research findings and produce a structured FeedbacK evaluation.
+    """Critique the research findings and produce a structured Feedback evaluation.
 
     Uses JSON prompting instead of ``with_structured_output`` for model
     compatibility. Graceful degradation on parse failure.
+
+    Rule-based pre-check skips LLM call for obvious pass/fail cases.
+    Configurable via ENABLE_EVALUATOR env var (default: true).
     """
     findings = state.get("section_research_findings")
     topic = state.get("topic", "")
@@ -119,6 +187,33 @@ def research_evaluator_node(state: ResearchState) -> dict:
             )
         }
 
+    # If evaluator disabled, always pass
+    if not config.enable_evaluator:
+        logger.info("Evaluator disabled via ENABLE_EVALUATOR — auto-passing")
+        print("  ⚠️  Evaluator disabled — auto-pass", flush=True)
+        return {
+            "research_evaluation": Feedback(
+                grade="pass",
+                comment="Evaluator disabled via configuration. Auto-pass.",
+                follow_up_queries=None,
+            )
+        }
+
+    # Rule-based pre-check: skip LLM for obvious cases
+    pre_check = _rule_based_evaluation(findings, topic)
+    if pre_check:
+        emoji = "✅" if pre_check.grade == "pass" else "❌"
+        source = "rule-based pre-check"
+        print(f"  {emoji} Evaluation ({source}): {pre_check.grade.upper()} — {pre_check.comment[:80]}", flush=True)
+        logger.info("Evaluator skipped LLM call — %s determined %s", source, pre_check.grade)
+
+        scores_entry = _extract_scores(pre_check.comment, state.get("iteration_count", 0))
+        return {
+            "research_evaluation": pre_check,
+            "evaluation_scores": [scores_entry] if scores_entry else [],
+        }
+
+    # Fall through to LLM-based evaluation for ambiguous cases
     try:
         llm = _get_llm()
 

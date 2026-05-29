@@ -335,3 +335,99 @@ def test_planner_generates_plan_when_not_approved():
     assert "research_plan" in result
     assert "parallel_goals" in result
     assert "[DELIVERABLE]" in result["research_plan"]
+
+
+def test_rule_based_evaluation_clear_pass():
+    """Rule-based pre-check returns PASS for substantial, cited, structured findings."""
+    from app.nodes.evaluator import _rule_based_evaluation
+    from app.state import Feedback
+    import textwrap
+
+    findings = textwrap.dedent("""
+    ## Section 1
+    Research shows that AI models improved by 15% in 2024.
+    Source: https://example.com/paper1
+
+    ## Section 2
+    Another study found 23% gains: https://example.com/paper2
+    And https://example.com/paper3 confirms this trend.
+    Additional context with more text to ensure we exceed the 1000 char threshold.
+    This provides substantial content about the research findings.
+    Multiple studies confirm the results across different domains.
+    The evidence is consistent and well-documented in the literature.
+    """)
+    result = _rule_based_evaluation(findings, "AI progress")
+    assert result is not None
+    assert isinstance(result, Feedback)
+    assert result.grade == "pass"
+    assert "4/5" in result.comment
+
+
+def test_rule_based_evaluation_clear_fail():
+    """Rule-based pre-check returns FAIL for findings with no citations."""
+    from app.nodes.evaluator import _rule_based_evaluation
+    from app.state import Feedback
+
+    findings = "Some vague claims about AI without any sources or numbers."
+    result = _rule_based_evaluation(findings, "AI progress")
+    assert result is not None
+    assert isinstance(result, Feedback)
+    assert result.grade == "fail"
+    assert result.follow_up_queries is not None
+    assert len(result.follow_up_queries) > 0
+
+
+def test_rule_based_evaluation_ambiguous():
+    """Rule-based pre-check returns None for ambiguous findings (fall through to LLM)."""
+    from app.nodes.evaluator import _rule_based_evaluation
+    import textwrap
+
+    # Has URLs and some structure but not clearly pass or fail
+    # (not enough URLs for clear pass, not empty enough for clear fail)
+    findings = textwrap.dedent("""
+    Some preliminary research on the topic with initial observations.
+    https://example.com/source1 provides some background.
+    No clear quantitative data yet but some qualitative insights exist.
+    This needs more investigation to draw firm conclusions.
+    """)
+    result = _rule_based_evaluation(findings, "topic")
+    assert result is None  # ambiguous, should fall through to LLM
+
+
+def test_evaluator_disabled_auto_pass():
+    """When ENABLE_EVALUATOR=false, evaluator auto-passes without LLM call."""
+    from app.nodes.evaluator import research_evaluator_node
+    import unittest.mock
+
+    state: ResearchState = {
+        "topic": "test",
+        "plan_approved": True,
+        "research_plan": "plan",
+        "report_sections": None,
+        "section_research_findings": "some findings with https://example.com/data",
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    with unittest.mock.patch("app.nodes.evaluator.config") as mock_config:
+        mock_config.enable_evaluator = False
+        result = research_evaluator_node(state)
+
+    assert result["research_evaluation"].grade == "pass"
+    assert "disabled" in result["research_evaluation"].comment.lower()
