@@ -40,6 +40,11 @@ Architectural concerns from code review (May 2026). Not blockers — the agent i
 
 ✅ **RESOLVED** (May 2026). Added E2E integration test (`tests/test_integration.py`) that mocks LLM and search tool, runs full graph pipeline, and verifies parallel research → merge → refinement → composer path. 16 total tests (15 unit + 1 E2E).
 
+**Remaining gaps (post-resolution):**
+- E2E test only runs happy path (immediate PASS). Missing scenarios: enhancer loop on FAIL, circuit breaker on stagnation, brief mode executive summary.
+- `_serialize_sources` function, brief mode composer path, multi-model critic vs worker distinction untested.
+- FakeLLM doesn't exercise the evaluator LLM path or enhancer regeneration path.
+
 ### 2. "Strings Everywhere" Architecture
 
 ✅ **PARTIALLY RESOLVED** (May 2026). Added `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable`, `ConfidenceTag`, and `ResearchOutput` Pydantic models. `_research_single_goal()` now returns a typed `ResearchFinding` with pre-extracted citations, preventing the parallel citation loss bug at the type level.
@@ -76,6 +81,40 @@ Also added `ENABLE_EVALUATOR` env var to disable evaluation entirely (auto-PASS)
 ### 7. PDF Dependency is Heavy
 
 ✅ **RESOLVED** (May 2026). PDF generation is now opt-in (`--pdf` flag). Default is markdown only. Saves ~100MB of system deps (pandoc/weasyprint) for most users.
+
+### 8. No Browser-Based Research
+
+🟡 **OPEN.** The agent fetches URL content (top 3 results, 5K chars each) and appends the full-page text to findings. This works for text-heavy pages but fails on:
+- JavaScript-rendered content (SPAs, dashboards)
+- Paywalled articles (Medium, WSJ)
+- Interactive visualizations
+- Cloudflare-protected pages
+
+A headless browser node (Playwright/Puppeteer) would unlock research topics that are currently invisible. This is the single highest-leverage improvement for research depth.
+
+**Effort:** Medium (2-3 days). **Impact:** High.
+
+### 9. Single LLM Provider Dependency
+
+🟡 **OPEN.** Both worker and critic use DeepSeek API. If DeepSeek is down, the agent is dead. The search backend has a nice Tavily → SearXNG → DuckDuckGo fallback chain, but there's no equivalent for the LLM.
+
+Adding an OpenAI-compatible fallback (OpenRouter, local Ollama) would mirror the search fallback pattern and make the agent provider-agnostic.
+
+**Effort:** Low (1 day). **Impact:** Medium.
+
+### 10. Env Var Management is Fragile
+
+🟡 **OPEN.** The `.docker.env` template works but `-e VAR` shell passthrough passes empty strings if VAR isn't set. The `WORKER_API_KEY="***"` pattern requires the key to be exported, which fails silently. Better ergonomics: explicit config validation at startup with clear error messages for missing required vars.
+
+**Effort:** Low (half day). **Impact:** Medium (prevents new-user frustration).
+
+### 11. No Per-Node Token Breakdown
+
+🟡 **OPEN.** `total_tokens` is tracked globally but you can't see where tokens are going. Is the evaluator burning 40% of the budget? Is the planner generating 8K-token plans? Without per-node breakdown, cost optimization is guesswork.
+
+Simple fix: `token_breakdown: dict[str, int]` updated by `get_llm()` when a `node` parameter is passed.
+
+**Effort:** Low (1 day). **Impact:** Medium.
 
 ## Next — Polish
 
@@ -122,13 +161,20 @@ Multiple research agents collaborating on a large topic. Planner distributes sub
 
 ### Browser-based research
 
-Current agent uses web search + text extraction. Adding browser-based research (navigate pages, click through, extract structured data) would improve depth for topics requiring interactive exploration.
+Current agent uses web search + text extraction (top 3 URLs, 5K chars each). Adding browser-based research would unlock:
+
+- **JavaScript-rendered content** — SPAs, dashboards, interactive tools (Playwright/Puppeteer node)
+- **Paywalled articles** — Medium, WSJ (archive.is fallback or authenticated sessions)
+- **Structured data extraction** — tables, charts, APIs embedded in pages
+- **Multi-page workflows** — search form → results → detail pages → extraction
+
+This is the single highest-leverage improvement for research depth on modern web content.
 
 ## Skills Captured
 
 | Skill | Content |
 |-------|---------|
-| `deep-research-langgraph-agent` | 13 production patterns: two-phase execution, 3-layer LLM constraints, Send API fan-out with citation extraction, subgraph refinement, numeric rubric evaluator, 5-stage citations, state pruning, circuit breaker, two-pass plan approval, SqliteSaver fallback, writable directory chain, progress tracking, MCP async patterns |
+| `deep-research-langgraph-agent` | 17 production patterns: two-phase execution, 3-layer LLM constraints, Send API fan-out with citation extraction, subgraph refinement, numeric rubric evaluator, 5-stage citations, state pruning, circuit breaker, two-pass plan approval, SqliteSaver fallback, writable directory chain, progress tracking, MCP async patterns, composer serialization bloat fix, rule-based evaluator pre-check, PDF opt-in pattern, SSE streaming for MCP |
 | `langgraph-agent-patterns` | StateGraph, Send API, subgraphs, interrupt/resume, checkpointing, JSON prompting, DELIVERABLE guarantee, circuit breaker, state pruning, progress markers, token tracking |
 | `langgraph-agent-deployment/references/architecture-patterns.md` | Two-phase execution, refinement subgraph, Send API fan-out, circuit breaker, state pruning, progress markers, token tracking, auto-approve pattern |
 | `langgraph-agent-deployment/references/quality-patterns.md` | Numeric rubric, per-claim confidence, source tiers, contradiction detection, DELIVERABLE guarantee, error surface |
