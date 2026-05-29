@@ -263,23 +263,45 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
                     print(f"    Error: {err}")
             return ""
 
-        # Save markdown report (graceful degradation on save failure)
+        # Save markdown report with fallback chain
+        # (config.output_dir may point to Docker path like /data when .docker.env is sourced)
         md_path = None
         pdf_path = None
-        try:
-            output_dir = Path(config.output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
-            md_path = output_dir / f"report_{safe_topic}_{timestamp}.md"
+        saved = False
 
-            with open(md_path, "w") as f:
-                f.write(report)
+        # Fallback chain: preferred → home/research → current dir → stdout only
+        candidates = [
+            Path(config.output_dir),
+            Path.home() / "research",
+            Path.cwd(),
+        ]
 
-            # ── Generate PDF ──
-            pdf_path = _convert_to_pdf(md_path)
-        except (PermissionError, OSError) as e:
-            logger.warning("Could not save report to file: %s — printing to stdout only", e)
+        for output_dir in candidates:
+            try:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                # Verify writable
+                test_file = output_dir / ".write_test"
+                test_file.write_text("ok")
+                test_file.unlink()
+
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
+                md_path = output_dir / f"report_{safe_topic}_{timestamp}.md"
+
+                with open(md_path, "w") as f:
+                    f.write(report)
+
+                pdf_path = _convert_to_pdf(md_path)
+                saved = True
+                break
+            except (PermissionError, OSError):
+                continue
+
+        if not saved:
+            logger.warning(
+                "Could not save report to any directory (tried %s) — printing to stdout only",
+                ", ".join(str(c) for c in candidates),
+            )
             md_path = None
             pdf_path = None
 

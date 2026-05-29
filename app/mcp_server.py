@@ -48,11 +48,36 @@ _research_lock = asyncio.Lock()
 _TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between sessions
 
 
+def _get_report_dir() -> Path:
+    """Return the first writable report directory from the fallback chain.
+
+    Order: RESEARCH_OUTPUT_DIR env → ~/research → current directory.
+    """
+    candidates = [
+        Path(os.getenv("RESEARCH_OUTPUT_DIR", "")),
+        Path.home() / "research",
+        Path.cwd(),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            # Verify writable
+            test_file = candidate / ".write_test"
+            test_file.write_text("ok")
+            test_file.unlink()
+            return candidate
+        except (PermissionError, OSError):
+            continue
+    # Should never reach here (cwd is always writable), but satisfy type checker
+    return Path.cwd()
+
+
 def _persist_task(task: dict) -> None:
     """Save completed task metadata to disk so it survives restarts."""
     import json as _json
-    report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
-    report_dir.mkdir(parents=True, exist_ok=True)
+    report_dir = _get_report_dir()
     meta_file = report_dir / f"task_{task['task_id']}.json"
     # Strip report text from disk copy (report is already in the .md file)
     disk_task = {k: v for k, v in task.items() if k != "report"}
@@ -63,7 +88,7 @@ def _persist_task(task: dict) -> None:
 def _load_persisted_task(task_id: str) -> dict | None:
     """Load completed task metadata from disk fallback."""
     import json as _json
-    report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
+    report_dir = _get_report_dir()
     meta_file = report_dir / f"task_{task_id}.json"
     if not meta_file.exists():
         return None
