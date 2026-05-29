@@ -42,6 +42,11 @@ logger = logging.getLogger(__name__)
 
 server = Server("deep-research")
 
+# ── Background task store for long-running deep research
+_research_tasks: dict[str, dict[str, Any]] = {}
+_research_lock = asyncio.Lock()
+_TASK_TTL_SECONDS = 3600  # auto-cleanup after 1 hour
+
 
 @server.list_tools()
 async def handle_list_tools() -> list[types.Tool]:
@@ -83,17 +88,14 @@ HOW IT WORKS:
 4. If quality < threshold, runs follow-up searches to fill gaps
 5. Synthesizes everything into a fully cited markdown report with per-claim confidence levels
 
-OUTPUT FORMAT:
-- Markdown report with inline citations as [Title](URL)
-- Executive Summary with overall confidence assessment (high/moderate/low)
-- Source Quality Assessment section (Tier 1/2/3 breakdown)
-- Cross-Cutting Themes with contradiction detection
-- Methodology section noting research process
+IMPORTANT: This tool returns immediately with a task_id. Use research_status(task_id)
+to check progress and retrieve the final report. Research runs in background
+and typically completes in 1-5 minutes. Polling every 10-15 seconds is
+recommended until status is "completed" or "failed".
 
 TOPIC GUIDANCE:
 - Be specific and contextual: "Compare LangGraph vs CrewAI for production multi-agent systems in 2026" works better than "AI agent frameworks"
 - Include time context if relevant (year, "current", "latest")
-- Mention specific angles you care about (performance, security, cost, ecosystem)
 
 USE FOR: competitive analysis, market research, technical deep-dives,
 regulatory reviews, vendor ecosystem mapping, literature surveys.
@@ -103,15 +105,39 @@ NOT FOR: simple fact lookups (use search tool), real-time data (stock prices, we
                 "properties": {
                     "topic": {
                         "type": "string",
-                        "description": "The research topic — be specific and contextual. Include time frame, angles, and constraints. Good: 'WebAssembly vs Docker for edge computing in 2026: performance, security, and ecosystem maturity'. Bad: 'wasm vs docker'.",
+                        "description": "The research topic — be specific and contextual.",
                     },
                     "max_iterations": {
                         "type": "integer",
-                        "description": "Max critique-refinement loops (default: 3, range: 1-5). Higher = better quality but slower and more expensive. Use 1-2 for quick overviews, 3-5 for deep analysis.",
-                        "default": 3,
+                        "description": "Max critique-refinement loops (default: 2, range: 1-5). Lower for faster results.",
+                        "default": 2,
                     },
                 },
                 "required": ["topic"],
+            },
+        ),
+        types.Tool(
+            name="research_status",
+            description="""Check the status of a running deep_research task.
+
+Takes a task_id returned by deep_research and returns:
+- status: "running" | "completed" | "failed"
+- progress: 0.0 to 1.0 (only when running)
+- report: the full markdown report (when completed)
+- error: error message (when failed)
+- topic, timestamp, report_path metadata
+
+Poll this until status is "completed" or "failed". Research typically
+takes 1-5 minutes.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "The task_id returned by deep_research",
+                    },
+                },
+                "required": ["task_id"],
             },
         ),
     ]
@@ -126,6 +152,8 @@ async def handle_call_tool(
         return await _handle_search(arguments)
     elif name == "deep_research":
         return await _handle_deep_research(arguments)
+    elif name == "research_status":
+        return await _handle_research_status(arguments)
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -181,70 +209,45 @@ async def _handle_search(
     return [types.TextContent(type="text", text="\n".join(lines))]
 
 
-async def _handle_deep_research(
-    arguments: dict[str, Any] | None
-) -> list[types.TextContent | types.EmbeddedResource]:
-    """Run the full LangGraph research pipeline."""
+def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
+    """Run the full research pipeline in background thread, updating _research_tasks.
 
-    topic = (arguments or {}).get("topic", "")
-    max_iterations = (arguments or {}).get("max_iterations", 3)
-
-    if not topic:
-        return [types.TextContent(type="text", text="Error: 'topic' is required.")]
-
-    # Import here so the module can be imported without all deps
-    from app.agent import build_research_graph
-    from app.config import config as research_config
-
-    # Override max iterations from the tool call
-    os.environ["MAX_SEARCH_ITERATIONS"] = str(max_iterations)
-
-    graph = build_research_graph()
-
-    initial_state = {
-        "topic": topic,
-        "plan_approved": True,  # Skip interrupt in MCP mode
-        "user_feedback": None,
-        "research_plan": None,
-        "report_sections": None,
-        "section_research_findings": None,
-        "research_evaluation": None,
-        "current_goal": "",
-            "parallel_goals": [],
-            "parallel_findings": [],
-            "research_iteration": 0,
-        "iteration_count": 0,
-        "max_iterations": max_iterations,
-        "url_to_short_id": {},
-        "sources": {},
-        "final_cited_report": None,
-        "final_report_with_citations": None,
-        "messages": [],
-        "errors": [],
-        "evaluation_scores": [],
-        "total_tokens": 0,
-        "cached_goal_count": 0,
-    }
-
+    Runs in a thread because graph.invoke() is synchronous and would block
+    the asyncio event loop. Uses asyncio.run_coroutine_threadsafe for the
+    lock-protected task store access.
+    """
     import time
+    import threading
+    from app.agent import build_research_graph
+    from app.nodes.planner import generate_plan_only
 
-    thread_id = f"research-{int(time.time())}"
-    thread_config = {"configurable": {"thread_id": thread_id}}
+    # Get the event loop for thread-safe task store access
+    loop = asyncio.new_event_loop()
 
-    # Notify progress (SSE sessions only; silent no-op on POST)
-    try:
-        await server.request_context.session.send_progress_notification(
-            progress_token="research",
-            progress=0.1,
-            total=1.0,
-        )
-    except Exception:
-        pass
+    task = _research_tasks.get(task_id)
+    if task:
+        task["status"] = "running"
+        task["progress"] = 0.05
 
     try:
-        # Generate plan first (avoids double-entry from stream+resume)
-        from app.nodes.planner import generate_plan_only
+        os.environ["MAX_SEARCH_ITERATIONS"] = str(max_iterations)
+        graph = build_research_graph()
+        initial_state = {
+            "topic": topic, "plan_approved": True, "user_feedback": None,
+            "research_plan": None, "report_sections": None,
+            "section_research_findings": None, "research_evaluation": None,
+            "current_goal": "", "parallel_goals": [], "parallel_findings": [],
+            "research_iteration": 0, "iteration_count": 0,
+            "max_iterations": max_iterations,
+            "url_to_short_id": {}, "sources": {},
+            "final_cited_report": None, "final_report_with_citations": None,
+            "messages": [], "errors": [], "evaluation_scores": [],
+            "total_tokens": 0, "cached_goal_count": 0,
+        }
+        thread_id = f"research-{int(time.time())}"
+        thread_config = {"configurable": {"thread_id": thread_id}}
 
+        # Generate plan
         plan_result = generate_plan_only(topic)
         initial_state["research_plan"] = plan_result["research_plan"]
         initial_state["report_sections"] = plan_result["report_sections"]
@@ -253,83 +256,174 @@ async def _handle_deep_research(
         if plan_result.get("total_tokens"):
             initial_state["total_tokens"] = plan_result["total_tokens"]
 
-        # Run graph with approved plan (single invoke, no interrupt)
-        final_values = graph.invoke(initial_state, thread_config)
+        if task:
+            task["progress"] = 0.2
 
+        # Run graph (sync — this is why we run in a thread)
+        final_values = graph.invoke(initial_state, thread_config)
         report = (
             final_values.get("final_report_with_citations")
-            or final_values.get("final_cited_report")
-            or ""
+            or final_values.get("final_cited_report") or ""
         )
-
-        try:
-            await server.request_context.session.send_progress_notification(
-                progress_token="research",
-                progress=1.0,
-                total=1.0,
-            )
-        except Exception:
-            pass
 
         if not report:
             errors = final_values.get("errors", [])
             err_text = "\n".join(errors) if errors else "Unknown error"
-            return [
-                types.TextContent(
-                    type="text",
-                    text=f"## Research Failed\n\nNo report was generated.\n\n**Errors:**\n{err_text}",
-                )
-            ]
+            if task:
+                task["status"] = "failed"
+                task["error"] = err_text
+            return
 
-        # Save report with timestamp
+        # Save report
         report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
         report_dir.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
         filename = report_dir / f"report_{safe_topic}_{timestamp}.md"
-
         with open(filename, "w") as f:
             f.write(report)
 
         # Generate PDF
+        pdf_path = None
         try:
             from app.cli import _convert_to_pdf
             pdf_path = _convert_to_pdf(filename)
         except Exception:
-            pdf_path = None
+            pass
 
-        pdf_note = f"\n**PDF:** {pdf_path}" if pdf_path else ""
+        if task:
+            task["status"] = "completed"
+            task["progress"] = 1.0
+            task["report"] = report
+            task["report_path"] = str(filename)
+            task["pdf_path"] = str(pdf_path) if pdf_path else None
+            task["char_count"] = len(report)
+            task["completed_at"] = time.time()
 
-        return [
-            types.TextContent(
-                type="text",
-                text=f"""## Research Complete
+    except Exception as e:
+        logger.exception("Background research failed for task %s", task_id)
+        if task:
+            task["status"] = "failed"
+            task["error"] = str(e)
+    finally:
+        loop.close()
 
+
+async def _handle_deep_research(
+    arguments: dict[str, Any] | None
+) -> list[types.TextContent]:
+    """Start deep research in background, return task_id immediately."""
+    import time, uuid
+
+    topic = (arguments or {}).get("topic", "")
+    max_iterations = (arguments or {}).get("max_iterations", 2)
+
+    if not topic:
+        return [types.TextContent(type="text", text="Error: 'topic' is required.")]
+
+    task_id = f"research-{uuid.uuid4().hex[:12]}"
+    now = time.time()
+
+    async with _research_lock:
+        _research_tasks[task_id] = {
+            "task_id": task_id,
+            "topic": topic,
+            "status": "queued",
+            "progress": 0.0,
+            "created_at": now,
+            "max_iterations": max_iterations,
+        }
+
+    # Cleanup stale tasks (>1 hour old)
+    async with _research_lock:
+        stale = [tid for tid, t in _research_tasks.items()
+                 if now - t.get("created_at", now) > _TASK_TTL_SECONDS]
+        for tid in stale:
+            del _research_tasks[tid]
+
+    # Launch background task in thread (sync graph.invoke blocks asyncio event loop)
+    asyncio.create_task(asyncio.to_thread(_deep_research_runner, task_id, topic, max_iterations))
+
+    return [types.TextContent(
+        type="text",
+        text=f"""## Research Started
+
+**Task ID:** {task_id}
 **Topic:** {topic}
-**Report saved:** {filename}{pdf_note}
-**Report size:** {len(report):,} chars
+**Max iterations:** {max_iterations}
+**Status:** queued → running in background
+
+Poll with research_status("{task_id}") every 10-15 seconds until status is "completed".
+Research typically completes in 1-5 minutes.
+
+Example: research_status(task_id="{task_id}")"""
+    )]
+
+
+async def _handle_research_status(
+    arguments: dict[str, Any] | None
+) -> list[types.TextContent]:
+    """Check the status of a background research task."""
+    task_id = (arguments or {}).get("task_id", "")
+
+    if not task_id:
+        return [types.TextContent(type="text", text="Error: 'task_id' is required.")]
+
+    async with _research_lock:
+        task = _research_tasks.get(task_id)
+
+    if not task:
+        return [types.TextContent(
+            type="text",
+            text=f"## Task Not Found\n\nTask ID `{task_id}` not found. It may have expired (>1 hour old) or never existed."
+        )]
+
+    status = task["status"]
+    import time
+
+    if status == "queued" or status == "running":
+        elapsed = time.time() - task.get("created_at", time.time())
+        return [types.TextContent(
+            type="text",
+            text=f"""## Research In Progress
+
+**Task ID:** {task_id}
+**Topic:** {task.get("topic", "")}
+**Status:** {status}
+**Progress:** {task.get("progress", 0):.0%}
+**Elapsed:** {elapsed:.0f}s
+
+Poll again in 10-15 seconds."""
+        )]
+
+    elif status == "completed":
+        report = task.get("report", "")
+        return [types.TextContent(
+            type="text",
+            text=f"""## Research Complete
+
+**Task ID:** {task_id}
+**Topic:** {task.get("topic", "")}
+**Report saved:** {task.get("report_path", "")}
+**PDF:** {task.get("pdf_path") or "not generated"}
+**Size:** {task.get("char_count", 0):,} chars
 
 ---
 
-{report[:8000]}""",
-            ),
-            types.EmbeddedResource(
-                type="resource",
-                resource=types.TextResourceContents(
-                    uri=f"file://{filename}",
-                    mimeType="text/markdown",
-                    text=report,
-                ),
-            ),
-        ]
+{report[:8000]}"""
+        )]
 
-    except Exception as e:
-        logger.exception("Research failed")
-        return [
-            types.TextContent(
-                type="text", text=f"## Research Failed\n\n**Error:** {e}"
-            )
-        ]
+    elif status == "failed":
+        return [types.TextContent(
+            type="text",
+            text=f"""## Research Failed
+
+**Task ID:** {task_id}
+**Topic:** {task.get("topic", "")}
+**Error:** {task.get("error", "Unknown error")}"""
+        )]
+
+    return [types.TextContent(type="text", text=f"Unknown status: {status}")]
 
 
 # ──────────────────────────────────────────────
@@ -431,14 +525,25 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                         },
                         {
                             "name": "deep_research",
-                            "description": "Run a deep, multi-phase research investigation on any topic. Generates plan, does web research, quality-checks, and returns a fully cited markdown report.",
+                            "description": "Run a deep, multi-phase research investigation on any topic. Returns a task_id immediately — poll with research_status(task_id) for results.",
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
                                     "topic": {"type": "string", "description": "The research topic"},
-                                    "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 3)", "default": 3},
+                                    "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 2)", "default": 2},
                                 },
                                 "required": ["topic"],
+                            },
+                        },
+                        {
+                            "name": "research_status",
+                            "description": "Check the status of a deep_research task. Returns 'running'/'completed'/'failed' with progress, report, or error.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "task_id": {"type": "string", "description": "Task ID from deep_research"},
+                                },
+                                "required": ["task_id"],
                             },
                         },
                     ]
