@@ -171,6 +171,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Stronger critic** | CRITIC_MODEL defaults to v4-pro (was v4-flash). Loud warning if critic == worker |
 | **URL content fetching** | After search, fetches top 3 URLs (5K chars each), appends full-page content to findings |
 | **Brief mode** | `depth: "brief"` produces 2-3 paragraph executive summary instead of full report |
+| **Live progress** | Research status shows actual pipeline stage %, not just stuck at 20%. Uses `graph.stream()` for per-node progress mapping |
 
 ## Quality Pipeline
 

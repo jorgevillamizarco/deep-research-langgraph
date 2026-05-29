@@ -24,6 +24,7 @@
 - [x] URL content fetching (fetch top 3 search results for full-page text)
 - [x] Output tiering (depth: brief/standard)
 - [x] Docker host mount for reports (reports on host filesystem, not Docker volume)
+- [x] Live progress tracking (graph.stream() maps per-node progress: 20%→30%→45%→55%→65%→85%→95%)
 - [x] Comprehensive docs (ARCHITECTURE.md, AGENTS.md, skills)
 - [ ] Self-documenting MCP tools (~~outputSchema~~ — reverted: Hermes enforces it on results, tools return markdown text not JSON)
 
