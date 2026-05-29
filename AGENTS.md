@@ -54,25 +54,41 @@ python -m app.cli --auto "Your research topic"
 # MCP stdio (for Hermes)
 python -m app.mcp_server --transport stdio
 
-# Docker + SearXNG
-docker compose up -d
+# Docker (with internal SearXNG + host-mounted output)
+docker build -t deep-research-agent .
+source ~/.hermes/.env
+docker run -d --name deep-research-agent \
+  --network research-net \
+  -p 8100:8100 \
+  -e SEARXNG_URL=http://deep-research-searxng:8080 \
+  -e WORKER_API_KEY="$DEEPSEEK_API_KEY" \
+  -e WORKER_API_BASE=https://api.deepseek.com \
+  -e WORKER_MODEL=deepseek-v4-flash \
+  -e MAX_SEARCH_ITERATIONS=3 \
+  -v /path/to/output:/data \
+  deep-research-agent
 hermes mcp add research --url http://localhost:8100/mcp
+
+# Or use deploy.sh (auto-detects internal SearXNG)
+./deploy.sh start
 ```
+
+**IMPORTANT:** The agent uses an internal SearXNG container (`deep-research-searxng`) on the `research-net` network. Set `SEARXNG_URL=http://deep-research-searxng:8080` — using `localhost:8080` from inside the container won't reach the host. API keys must be passed explicitly (not via `-e VAR` shell passthrough, which passes empty values).
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WORKER_MODEL` | `deepseek-v4-flash` | LLM for research/composition |
-| `CRITIC_MODEL` | `deepseek-v4-flash` | LLM for evaluation |
-| `WORKER_API_KEY` | — | API key for worker model |
+| `CRITIC_MODEL` | `deepseek-v4-pro` | LLM for evaluation (should be stronger than worker) |
+| `WORKER_API_KEY` | — | API key (set via `$DEEPSEEK_API_KEY` from `.hermes/.env`) |
 | `WORKER_API_BASE` | — | API base URL |
-| `SEARXNG_URL` | `http://localhost:8080` | Self-hosted search |
+| `SEARXNG_URL` | `http://deep-research-searxng:8080` | Internal SearXNG container on research-net |
 | `MAX_SEARCH_ITERATIONS` | `3` | Max critique loops |
-| `RESEARCH_OUTPUT_DIR` | `~/research` | Report output directory |
+| `RESEARCH_OUTPUT_DIR` | `/data` | Report output directory (mount host path here) |
 | `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
 
-**Multi-model support:** Set `WORKER_MODEL` for research/composition tasks and `CRITIC_MODEL` for evaluation. Use a stronger model for the critic (e.g., Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
+**Multi-model support:** Set `WORKER_MODEL` for research/composition and `CRITIC_MODEL` for evaluation. Critic defaults to `deepseek-v4-pro` (stronger than worker). The evaluator warns loudly if critic == worker — same-model evaluation produces inflated scores (LLMs grading their own output).
 
 ## MCP Tools
 
@@ -81,11 +97,14 @@ hermes mcp add research --url http://localhost:8100/mcp
 ```json
 {
   "topic": "string (required)",
-  "max_iterations": "integer (optional, default 2)"
+  "max_iterations": "integer (optional, default 2)",
+  "depth": "string (optional, 'brief' or 'standard')"
 }
 ```
 
 Returns a `task_id` immediately. Pipeline runs in background. Poll with `research_status`.
+
+**Depth:** `brief` → 2-3 paragraph executive summary (1-2 min). `standard` → full cited report (3-5 min).
 
 ### `research_status` — Poll running research
 
@@ -149,6 +168,9 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Flexible structure** | Composer uses planner's section outline as primary template |
 | **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results) |
 | **Async execution** | `deep_research` returns task_id immediately, runs in background thread, poll with `research_status` |
+| **Stronger critic** | CRITIC_MODEL defaults to v4-pro (was v4-flash). Loud warning if critic == worker |
+| **URL content fetching** | After search, fetches top 3 URLs (5K chars each), appends full-page content to findings |
+| **Brief mode** | `depth: "brief"` produces 2-3 paragraph executive summary instead of full report |
 
 ## Quality Pipeline
 
