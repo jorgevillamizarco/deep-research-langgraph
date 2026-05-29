@@ -253,7 +253,7 @@ flowchart TB
 | **Send API for fan-out** | LangGraph's official pattern for parallel execution. Avoids external process management (old Hermes chat spawning). |
 | **Deliverable inside refinement loop** | Enhancer findings must flow through Phase 2 for full regeneration — not shallow append. |
 | **Dedicated SearXNG with `limiter: false`** | Shared Hermes SearXNG has rate limiting enabled. Research agent needs unlimited access. |
-| **MCP POST JSON-RPC handler** | Hermes probes MCP via POST, not just SSE. Full `initialize` / `tools/list` / `tools/call` dispatch. |
+| **MCP POST JSON-RPC handler** | Hermes probes MCP via POST, not just SSE. Full `initialize` / `tools/list` dispatch. `tools/call` executes tools directly (no stub redirect). Progress notifications degrade silently on POST (no SSE context). Embedded resource URIs are stringified for JSON serialization (Pydantic `AnyUrl`). |
 | **MCP tool descriptions** | Rich self-documenting descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) with examples. `outputSchema` removed — Hermes MCP client enforces it on results and our tools return markdown text, not structured JSON. |
 | **Health check ≥30s** | Long research runs exceed default 5s Docker health check. Prevents flapping. |
 | **State pruning on report** | Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5) to prevent O(N²) checkpoint bloat. Finding: 200-turn agent → 5.3 GB checkpoints without pruning. |

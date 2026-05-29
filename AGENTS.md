@@ -98,6 +98,8 @@ Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 
 Returns markdown-formatted search results with titles, URLs, and snippets.
 
+Both tools work over SSE and POST JSON-RPC (Hermes transport). The POST handler executes tools directly — no stub redirect.
+
 ## Production Features
 
 | Feature | How |
