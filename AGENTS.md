@@ -2,7 +2,9 @@
 
 ## Agent Instructions
 
-After every feature/fix: run tests → verify live endpoint → update all project docs (AGENTS.md, ARCHITECTURE.md, ROADMAP.md) → semantic commit → push.
+After every feature/fix: run tests → verify live endpoint → **rebuild + deploy Docker → verify container healthy** → update all project docs (AGENTS.md, ARCHITECTURE.md, ROADMAP.md) → semantic commit → push.
+
+Never skip the Docker deploy step. Venv-only testing misses container-specific issues (missing packages, import path differences, env var behavior). The SqliteSaver import worked in venv but failed in the container — this class of bug is invisible without Docker verification.
 
 Important learnings (MCP patterns, LangGraph patterns, deployment patterns) must be retrofitted into Hermes skills so knowledge doesn't stay siloed in this repo.
 
