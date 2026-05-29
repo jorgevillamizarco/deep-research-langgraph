@@ -25,6 +25,7 @@ import logging
 from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.constants import END
 from langgraph.types import Send
 from langgraph.graph import StateGraph
@@ -134,12 +135,27 @@ def parallel_researcher_node(state: ResearchState) -> dict:
 
 
 def merge_findings_node(state: ResearchState) -> dict:
-    """Merge all parallel research findings into a single research output."""
+    """Merge all parallel research findings into a single research output.
+
+    Also extracts citations from the combined findings so that sources
+    discovered during parallel Phase 1 are available for the composer.
+    """
+    from app.tools.citations import extract_citations_from_content
+
     findings = state.get("parallel_findings", [])
     combined = "\n\n---\n\n".join(findings) if findings else ""
     logger.info("Merged %d parallel findings (%d chars)", len(findings), len(combined))
     print(f"  📦 Phase 1 complete — {len(findings)} goals, {len(combined):,} chars", flush=True)
-    return {"section_research_findings": combined}
+
+    # Extract citations from ALL Phase 1 findings (parallel + sequential)
+    existing_count = len(state.get("url_to_short_id", {}))
+    new_sources, new_url_map = extract_citations_from_content(combined, existing_count)
+
+    return {
+        "section_research_findings": combined,
+        "sources": new_sources,
+        "url_to_short_id": new_url_map,
+    }
 
 
 # ──────────────────────────────────────────────
@@ -185,12 +201,20 @@ def build_research_graph(checkpointer=None):
     """Build and compile the deep research graph with parallel research.
 
     Args:
-        checkpointer: Optional LangGraph checkpointer (default: MemorySaver).
+        checkpointer: Optional LangGraph checkpointer (default: SqliteSaver).
 
     Returns:
         A compiled StateGraph ready for invocation.
     """
-    checkpointer = checkpointer or MemorySaver()
+    if checkpointer is None:
+        import os
+        import sqlite3
+        db_path = os.getenv("CHECKPOINT_DB_PATH", "checkpoints.db")
+        try:
+            conn = sqlite3.connect(db_path, check_same_thread=False)
+            checkpointer = SqliteSaver(conn)
+        except Exception:
+            checkpointer = MemorySaver()
 
     builder = StateGraph(ResearchState)
 

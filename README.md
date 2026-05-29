@@ -41,16 +41,19 @@ python3 -m venv .venv
 
 Set via environment variables (or `.env` file):
 
-| Variable | Default | Description |
+|| Variable | Default | Description |
 |----------|---------|-------------|
-| `WORKER_MODEL` | `deepseek-v4-flash` | Model for research tasks |
-| `CRITIC_MODEL` | `deepseek-v4-flash` | Model for evaluation tasks |
+| `WORKER_MODEL` | `deepseek-v4-flash` | Model for research/composition tasks |
+| `CRITIC_MODEL` | `deepseek-v4-pro` | Model for evaluation (should be stronger) |
 | `WORKER_API_KEY` | `OPENAI_API_KEY` | API key for worker model |
 | `WORKER_API_BASE` | `OPENAI_API_BASE` | API base URL for worker |
 | `CRITIC_API_KEY` | falls back to WORKER | API key for critic model |
 | `CRITIC_API_BASE` | falls back to WORKER | API base for critic model |
-| `MAX_SEARCH_ITERATIONS` | `5` | Max critique loop iterations |
-| `TAVILY_API_KEY` | (none → DuckDuckGo) | Web search API key |
+| `SEARXNG_URL` | `http://deep-research-searxng:8080` | Internal SearXNG endpoint |
+| `MAX_SEARCH_ITERATIONS` | `3` | Max critique loop iterations |
+| `RESEARCH_OUTPUT_DIR` | `/data` | Report output directory (Docker mount) |
+| `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
+| `TAVILY_API_KEY` | (none → SearXNG → DuckDuckGo) | Web search API key |
 
 ## Project Structure
 
@@ -80,7 +83,7 @@ deep-research-langgraph/
 - **StateGraph** over Functional API — needed for conditional routing (pass/fail from evaluator)
 - **Subgraph for refinement loop** — isolates critic→enhancer logic, mirrors ADK's LoopAgent
 - **JSON prompting for evaluator** instead of `with_structured_output` — broader model compatibility
-- **Interrupts for plan approval** — LangGraph's built-in human-in-the-loop
+- **Two-pass plan approval** (outside graph) instead of interrupt() — avoids double-entry bug, saves one LLM call
 - **State reducers** — `operator.or_` merges sources across refinement iterations
 
 ## Development

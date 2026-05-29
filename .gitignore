@@ -25,7 +25,9 @@ Thumbs.db
 # Research data
 *.xlsx
 *.docx
-
+*.db
+checkpoints.db
+research_cache.db
 # Tests / debug
 .pytest_cache/
 .pytest_cache/

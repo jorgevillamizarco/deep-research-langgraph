@@ -1,12 +1,40 @@
-.venv
-.env
-*.pyc
-__pycache__
-.pytest_cache
-.git
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+
+# Git
+.git/
 .gitignore
-*.egg-info
-.hermes
-build
-dist
-*.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data
+*.db
+*.sqlite
+*.sqlite3
+research_cache.db
+checkpoints.db
+
+# Output (host-mounted)
+output/
+reports/
+
+# Misc
+*.log
+.DS_Store

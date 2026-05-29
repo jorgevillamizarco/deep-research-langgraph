@@ -174,3 +174,164 @@ def test_citation_replacement():
 
     assert "[Example Page](https://example.com)" in result
     assert "<cite" not in result
+
+
+def test_merge_findings_extracts_citations():
+    """merge_findings_node extracts citations from parallel findings."""
+    from app.agent import merge_findings_node
+
+    state: ResearchState = {
+        "topic": "test",
+        "plan_approved": True,
+        "research_plan": "plan",
+        "report_sections": None,
+        "section_research_findings": None,
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [
+            "Finding 1 with [Example](https://example.com)",
+            "Finding 2 with [ArXiv](https://arxiv.org/abs/1234)",
+        ],
+    }
+
+    result = merge_findings_node(state)
+
+    assert "section_research_findings" in result
+    assert "sources" in result
+    assert "url_to_short_id" in result
+
+    sources = result["sources"]
+    url_map = result["url_to_short_id"]
+
+    assert len(sources) >= 2
+    assert "https://example.com" in url_map
+    assert "https://arxiv.org/abs/1234" in url_map
+    # arxiv should be tier 1
+    arxiv_src = sources.get(url_map["https://arxiv.org/abs/1234"])
+    if arxiv_src:
+        assert arxiv_src["tier"] == 1
+
+
+def test_cache_delta_check_list_results():
+    """_delta_check correctly handles list[dict] search results."""
+    from app.cache import _delta_check
+    import unittest.mock
+
+    cached_sources = {
+        "src-1": {"url": "https://example.com/page"},
+    }
+
+    # Fresh: 1 new domain out of 2 -> True
+    results_fresh = [
+        {"url": "https://new-domain.com/article", "title": "New"},
+        {"url": "https://example.com/page", "title": "Old"},
+    ]
+    with unittest.mock.patch("app.tools.search.get_search_tool") as mock_get:
+        mock_tool = unittest.mock.MagicMock()
+        mock_tool.invoke.return_value = results_fresh
+        mock_get.return_value = mock_tool
+        assert _delta_check("topic", "goal", cached_sources) is True
+
+    # Stale: 2 new domains -> False
+    results_stale = [
+        {"url": "https://new1.com/a", "title": "N1"},
+        {"url": "https://new2.com/b", "title": "N2"},
+        {"url": "https://example.com/page", "title": "Old"},
+    ]
+    with unittest.mock.patch("app.tools.search.get_search_tool") as mock_get:
+        mock_tool = unittest.mock.MagicMock()
+        mock_tool.invoke.return_value = results_stale
+        mock_get.return_value = mock_tool
+        assert _delta_check("topic", "goal", cached_sources) is False
+
+
+def test_planner_skips_when_approved():
+    """planner_node returns empty dict when plan is already approved."""
+    from app.nodes.planner import planner_node
+
+    state: ResearchState = {
+        "topic": "test topic",
+        "plan_approved": True,
+        "research_plan": "Existing plan",
+        "report_sections": None,
+        "section_research_findings": None,
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    result = planner_node(state)
+    assert result == {}
+
+
+def test_planner_generates_plan_when_not_approved():
+    """planner_node generates plan when not approved."""
+    from app.nodes.planner import planner_node
+
+    state: ResearchState = {
+        "topic": "test topic",
+        "plan_approved": False,
+        "research_plan": None,
+        "report_sections": None,
+        "section_research_findings": None,
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    # This will call the LLM — we can't easily mock without more setup.
+    # Just verify it doesn't crash and returns expected keys.
+    # Skip in CI by checking for API key.
+    import os
+    if not os.getenv("WORKER_API_KEY"):
+        return
+
+    result = planner_node(state)
+    assert "research_plan" in result
+    assert "parallel_goals" in result
+    assert "[DELIVERABLE]" in result["research_plan"]

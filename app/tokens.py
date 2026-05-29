@@ -74,5 +74,7 @@ def get_llm(model: str, api_key: str | None = None, base_url: str | None = None,
         temperature=temperature,
         api_key=api_key or None,
         base_url=base_url or None,
+        timeout=60,
+        max_retries=2,
     )
     return _TrackedChatOpenAI(llm)

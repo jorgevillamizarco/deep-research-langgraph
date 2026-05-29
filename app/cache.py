@@ -146,11 +146,10 @@ def _delta_check(topic: str, goal_text: str, cached_sources: dict) -> bool:
                 cached_urls.add(src.get("url", ""))
         
         new_domains = 0
-        if hasattr(results, 'results'):
-            for r in results.results[:3]:
-                url = getattr(r, 'url', '') or getattr(r, 'link', '')
-                if url and url not in cached_urls:
-                    new_domains += 1
+        for r in results[:3] if isinstance(results, list) else []:
+            url = r.get("url", "") or r.get("link", "")
+            if url and url not in cached_urls:
+                new_domains += 1
         
         # If 2+ results are from new domains, cache is stale
         return new_domains < 2
@@ -213,7 +212,7 @@ def get_cached_goal(goal_text: str, topic: str) -> dict | None:
 
 def cache_goal(goal_text: str, findings: str, sources: dict, avg_tier: float = 3.0) -> None:
     """Store a goal's findings in cache. Overwrites existing entry."""
-    if _topic_is_date_bound(""):  # Don't cache if date-bound — checked at get time
+    if _topic_is_date_bound(goal_text):  # Don't cache if goal is date-bound
         return
     
     goal_hash = _hash_goal(goal_text)

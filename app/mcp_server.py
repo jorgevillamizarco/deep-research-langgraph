@@ -294,15 +294,13 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
 
         # Run graph with streaming for progress tracking
         node_progress = {
-            "__start__": 0.2,
-            "planner": 0.2,
-            "parallel_researcher": 0.3,
+            "__start__": 0.0,
+            "planner": 0.1,
+            "parallel_researcher": 0.25,
             "merge_findings": 0.45,
-            "deliverable": 0.55,
-            "research_evaluator_node": 0.65,
-            "enhancer": 0.72,
+            "refinement_loop": 0.65,
             "composer": 0.85,
-            "final_report_with_citations": 0.95,
+            "__end__": 1.0,
         }
 
         report = ""
@@ -369,8 +367,11 @@ async def _handle_deep_research(
     import time, uuid
 
     topic = (arguments or {}).get("topic", "")
-    max_iterations = (arguments or {}).get("max_iterations", 2)
+    max_iterations = max(1, min(int((arguments or {}).get("max_iterations", 2)), 10))
     depth = (arguments or {}).get("depth", "standard")
+
+    if depth not in ("brief", "standard"):
+        depth = "standard"
 
     if not topic:
         return [types.TextContent(type="text", text="Error: 'topic' is required.")]

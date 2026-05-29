@@ -22,7 +22,6 @@ import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.types import interrupt
 
 from app.config import config
 from app.state import ResearchState
@@ -81,13 +80,17 @@ def _extract_research_goals(plan: str) -> list[str]:
 
 
 def planner_node(state: ResearchState) -> dict:
-    """Generate research plan, extract parallel goals, interrupt for human approval."""
+    """Generate research plan, extract parallel goals.
+
+    Plan approval happens OUTSIDE the graph (two-pass approach via
+    generate_plan_only + pre-populated state). This avoids LangGraph
+    interrupt() double-entry issues and saves one LLM call.
+    """
     topic = state.get("topic", "")
     if not topic:
         return {"errors": ["No topic provided"]}
 
     previous_plan = state.get("research_plan")
-    user_feedback = state.get("user_feedback")
     plan_approved = state.get("plan_approved", False)
 
     # If already approved with a plan, pass through
@@ -95,14 +98,8 @@ def planner_node(state: ResearchState) -> dict:
         logger.info("Plan already approved — skipping planner")
         return {}
 
-    # If resuming from interrupt with approval but no plan in state yet,
-    # regenerate (the plan text was in the interrupt payload, lost on resume)
-    if plan_approved and not previous_plan:
-        logger.info("Plan approved on resume — regenerating with same prompt")
-        # Fall through to regenerate — prompt includes DELIVERABLE mandate
-
     llm = _get_llm()
-    plan = _generate_plan(topic, previous_plan, user_feedback, llm=llm)
+    plan = _generate_plan(topic, previous_plan, state.get("user_feedback"), llm=llm)
     sections = _generate_sections(plan, llm=llm)
     goals = _extract_research_goals(plan)
 
@@ -117,47 +114,10 @@ def planner_node(state: ResearchState) -> dict:
 
     logger.info("Plan: %d chars | Sections: %d chars | Goals: %d", len(plan), len(sections), len(goals))
 
-    resume_value = interrupt({
-        "question": "Review the research plan below. Approve to proceed or provide feedback.",
-        "research_plan": plan,
-        "report_sections": sections,
-        "topic": topic,
-    })
-
-    if isinstance(resume_value, dict):
-        if resume_value.get("plan_approved"):
-            # Use plan from resume value if passed (avoids regeneration on auto-approve)
-            approved_plan = resume_value.get("research_plan", plan)
-            approved_sections = resume_value.get("report_sections", sections)
-            # Re-extract goals from the original plan (may differ from regenerated)
-            if resume_value.get("research_plan"):
-                goals = _extract_research_goals(approved_plan)
-            logger.info("Plan approved — %d parallel goals for fan-out", len(goals))
-            return {
-                "research_plan": approved_plan,
-                "report_sections": approved_sections,
-                "plan_approved": True,
-                "user_feedback": None,
-                "parallel_goals": goals,
-                **llm.token_delta(),
-            }
-        elif resume_value.get("user_feedback"):
-            feedback = resume_value["user_feedback"]
-            logger.info("User feedback: %s", feedback[:80])
-            return {
-                "research_plan": plan,
-                "report_sections": sections,
-                "plan_approved": False,
-                "user_feedback": feedback,
-                "parallel_goals": goals,
-                **llm.token_delta(),
-            }
-
     return {
         "research_plan": plan,
         "report_sections": sections,
         "plan_approved": False,
-        "user_feedback": None,
         "parallel_goals": goals,
         **llm.token_delta(),
     }

@@ -87,7 +87,7 @@ def enhanced_search_executor_node(state: ResearchState) -> dict:
 The initial research for "{topic}" was found incomplete. Below are additional search results.
 
 EXISTING FINDINGS:
-{existing_findings[:2000]}
+{existing_findings}
 
 ADDITIONAL SEARCH RESULTS:
 {new_content_text}
