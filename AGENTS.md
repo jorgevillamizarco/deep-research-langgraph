@@ -209,3 +209,13 @@ Lessons from building and iterating on this agent:
 **Production reliability comes from research, not intuition.** We used the agent to research LangGraph production patterns, found the O(N²) checkpoint bloat issue, and applied the fix (state pruning). The circuit breaker came from the same research. Using the tool to improve the tool is the defining pattern.
 
 **Stream + invoke is fragile.** LangGraph's `interrupt()` mechanism with `graph.stream()` + `graph.invoke(Command(resume=...))` caused planner double-entry. The fix was eliminating `interrupt()` entirely — a two-pass approach where plan generation happens outside the graph. Simpler, faster, one less LLM call.
+
+**Parallel mode silently lost citations.** `parallel_researcher_node` returned only strings — no citation extraction. The `merge_findings_node` just concatenated text. URLs from parallel research never reached the composer. Fix: run `extract_citations_from_content()` in `merge_findings_node` so Phase 1 sources are available to Phase 2 and the composer.
+
+**Token reporting was broken by type confusion.** `final_state` from `graph.invoke()` is a plain dict, but the CLI treated it as a `StateSnapshot` object and called `.values()` (the dict method). Result: tokens always showed 0. Fix: use `final_state.get("total_tokens")` directly.
+
+**Cache delta check was a no-op.** `_delta_check()` checked `hasattr(results, 'results')` but the search tool returns `list[dict]`. The branch never executed, so stale cache entries were always served as "fresh." Fix: iterate over `results` (list) directly.
+
+**Writable directory fallback is essential.** `.docker.env` sets `RESEARCH_OUTPUT_DIR=/data` for Docker. When sourced on the host for CLI testing, `mkdir('/data')` fails with PermissionError. Both CLI and MCP server now try a fallback chain: env var → ~/research → current directory, with a write-test probe on each candidate.
+
+**WeasyPrint warns about unsupported CSS.** The fallback HTML template included `overflow-x: auto` on `<pre>` blocks. WeasyPrint is a print renderer with no scrollable viewport — it warns about unknown properties. The PDF still generates, but the warning is noisy. Fix: remove unsupported properties; filter benign stderr lines when pandoc succeeds.

@@ -260,6 +260,8 @@ flowchart TB
 | **DELIVERABLE failsafe** | Planner prompt mandates 1-2 DELIVERABLE goals. Post-processing appends default if none generated. Deliverable node has string-match failsafe when regex misses the tag. Phase 2 guaranteed to execute. |
 | **Circuit breaker** | Evaluator loop detects score stagnation across 2 iterations. If total score doesn't improve, forces pass to avoid wasted enhancer cycles. Scores parsed from evaluator comments for stagnation detection. |
 | **Async background execution** | `deep_research` returns task_id immediately (<1s). Pipeline runs in background thread (sync `graph.invoke()` blocks asyncio event loop). Client polls `research_status` every 10-15s. 1-hour TTL on stored tasks. |
+| **Writable directory fallback** | CLI and MCP server try RESEARCH_OUTPUT_DIR → ~/research → cwd with write-test probe. Prevents PermissionError when .docker.env (with /data) is sourced on host. |
+| **LLM timeout/retry** | `ChatOpenAI` configured with `timeout=60` and `max_retries=2` to handle transient API failures gracefully. |
 
 ## Production Features
 
@@ -318,9 +320,9 @@ Separate models for research (worker) and evaluation (critic) via environment:
 | Variable | Default | Role |
 |----------|---------|------|
 | `WORKER_MODEL` | `deepseek-v4-flash` | Research, composition, deliverables |
-| `CRITIC_MODEL` | `deepseek-v4-flash` | Quality evaluation |
+| `CRITIC_MODEL` | `deepseek-v4-pro` | Quality evaluation (stronger than worker) |
 
-Use a stronger model for critic (Claude Sonnet, GPT-4) to catch subtle quality issues. DeepSeek V4 Flash is the default for both — fast and cost-effective.
+Use a stronger model for critic to catch subtle quality issues. DeepSeek V4 Pro is the default critic — slower but more accurate than Flash. Same-model evaluation (Flash grading Flash) produces inflated scores.
 
 ### Cross-Run Cache
 
@@ -348,19 +350,19 @@ deep-research-langgraph/
 │   ├── config.py             # Env-based configuration dataclass
 │   ├── cli.py                # Interactive CLI with plan review
 │   ├── mcp_server.py         # MCP SSE/stdio + JSON-RPC POST handler
+│   ├── tokens.py             # Shared LLM factory + token tracking
+│   ├── cache.py              # Cross-run goal cache (TTL + delta check)
 │   ├── nodes/
-│   │   ├── planner.py        # Plan generation + interrupt
+│   │   ├── planner.py        # Plan generation (two-pass, no interrupt)
 │   │   ├── researcher.py     # Phase 1 research + Phase 2 deliverable
 │   │   ├── evaluator.py      # Numeric rubric quality evaluation
 │   │   ├── enhancer.py       # Follow-up search + synthesis
 │   │   └── composer.py       # Report with structured citations
 │   └── tools/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
-│       ├── citations.py      # URL extraction, tier annotation, tag replacement
-│       ├── tokens.py         # Shared LLM factory + token tracking
-│       └── cache.py          # Cross-run goal cache (TTL + delta check)
+│       └── citations.py      # URL extraction, tier annotation, tag replacement
 ├── tests/
-│   └── test_agent.py         # 8 unit tests
+│   └── test_agent.py         # 12 unit tests
 ├── Dockerfile
 ├── docker-compose.yml
 ├── deploy.sh                 # One-command deploy with SearXNG detection
