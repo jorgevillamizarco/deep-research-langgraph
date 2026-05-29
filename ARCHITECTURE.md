@@ -261,6 +261,8 @@ flowchart TB
 | **Circuit breaker** | Evaluator loop detects score stagnation across 2 iterations. If total score doesn't improve, forces pass to avoid wasted enhancer cycles. Scores parsed from evaluator comments for stagnation detection. |
 | **Async background execution** | `deep_research` returns task_id immediately (<1s). Pipeline runs in background thread (sync `graph.invoke()` blocks asyncio event loop). Client polls `research_status` every 10-15s. 1-hour TTL on stored tasks. |
 | **PRR assessment** | Production Readiness Review replaces letter grades. 5 dimensions (monitoring, incident response, security, scalability, operability) with concrete pass/fail items. See ROADMAP.md. |
+| **Topic enrichment** | Raw topic → structured research brief (domain, ambiguities, output format, key dimensions). One cheap LLM call before planning prevents entire research runs going in the wrong direction. Skips on feedback/refinement cycles. |
+| **Verification pass** | After Phase 1 synthesis, detects domain-specific keywords (manufacturing, defense, etc.) and runs cross-check search with disambiguators (\"software engineering\"). Appends Verification Note if alternative context found. Only triggers when concerning terms detected — zero cost otherwise. |
 | **Writable directory fallback** | CLI and MCP server try RESEARCH_OUTPUT_DIR → ~/research → cwd with write-test probe. Prevents PermissionError when .docker.env (with /data) is sourced on host. |
 | **LLM timeout/retry** | `ChatOpenAI` configured with `timeout=60` and `max_retries=2` to handle transient API failures gracefully. |
 

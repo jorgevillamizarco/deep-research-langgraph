@@ -51,6 +51,12 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 
 **Verdict:** Production-usable for single-user deployment. Not production-grade for multi-tenant or mission-critical use. The 5 remaining gaps are all operational concerns, not architectural — the agent's core research pipeline is solid.
 
+**Research quality improvements (May 2026):**
+- Topic enrichment: raw user topics are pre-processed into structured research briefs with domain context and ambiguity detection
+- Verification pass: after Phase 1 synthesis, cross-checks for domain mismatches (e.g., manufacturing PRR vs software PRR)
+- Smarter browser: browser extraction for top result when HTTP content is sparse, with same-domain link following
+- Domain disambiguation: planner prompt instructs LLM to identify terms with multiple meanings across domains
+
 ---
 
 ## Now — Production Ready

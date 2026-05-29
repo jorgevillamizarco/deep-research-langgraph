@@ -183,6 +183,9 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Typed models** | `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable` Pydantic types |
 | **Live progress** | Research status shows actual pipeline stage %, not just stuck at 20%. Uses `graph.stream()` for per-node progress mapping |
 | **E2E integration test** | `tests/test_integration.py` mocks LLM + search, runs full graph pipeline (4 scenarios: happy path, enhancer loop, circuit breaker, brief mode) |
+| **Topic enrichment** | Pre-processes raw topic into structured brief (domain, ambiguities, expected output, key dimensions). 1 LLM call saves multiple downstream API calls. |
+| **Verification pass** | After Phase 1 synthesis, cross-checks for domain mismatches via targeted search. Catches errors like finding manufacturing PRR when user wants software PRR. |
+| **Smarter browser** | HTTP for all top URLs + browser with link-following for #1 result when content is sparse. Follows relevant same-domain links. |
 | **Type-safe accessors** | `findings_from_state()` / `findings_to_state()` / `get_typed_sources()` — typed Pydantic wrappers around string-based state, citation extraction without regex |
 | **Browser extraction** | Playwright + system Chromium (apt) — verified 11K chars from JS-rendered pages. Two-stage: HTTP → browser fallback |
 | **29 tests** | 25 unit + 4 E2E scenarios, all passing in ~10s |
@@ -191,8 +194,9 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 
 ```mermaid
 flowchart LR
-    P[Planner] -->|DELIVERABLE guarantee| R[Phase 1: Research]
-    R --> D[Phase 2: Deliverable]
+    T[Topic] -->|enrich| P[Planner]
+    P -->|DELIVERABLE guarantee| R[Phase 1: Research]
+    R -->|verify| D[Phase 2: Deliverable]
     D --> E[Evaluator: numeric rubric]
     E -->|FAIL| EN[Enhancer: follow-up queries]
     EN --> D
