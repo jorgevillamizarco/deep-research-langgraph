@@ -345,7 +345,7 @@ SSE endpoint `/stream/{task_id}` provides real-time research progress to MCP cli
 | `failed` | `{error}` |
 | `heartbeat` | `{}` (every 5s) |
 
-Thread-safe: the background runner pushes events via `call_soon_threadsafe` so asyncio queue operations are safe from the sync `graph.invoke()` thread. Queue auto-creates per task_id and cleans up on completion.
+Thread-safe: the background runner pushes events via `_main_event_loop` (stored at server startup). `asyncio.get_event_loop()` fails in background threads on Python 3.12+. Queue auto-creates per task_id and cleans up on completion.
 
 ### Evaluator Pre-Check
 

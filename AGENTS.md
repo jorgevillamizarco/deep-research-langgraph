@@ -174,7 +174,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Flexible structure** | Composer uses planner's section outline as primary template |
 | **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results) |
 | **Async execution** | `deep_research` returns task_id immediately, runs in background thread, poll with `research_status` |
-| **SSE streaming** | `GET /stream/{task_id}` for real-time progress: started, update, completed, heartbeat events |
+| **SSE streaming** | `GET /stream/{task_id}` for real-time progress: started, update, completed, heartbeat events. Uses stored `_main_event_loop` for thread-safe push (Python 3.12+ compat). |
 | **Stronger critic** | CRITIC_MODEL defaults to v4-pro (was v4-flash). Loud warning if critic == worker |
 | **Evaluator pre-check** | Rule-based PASS/FAIL/AMBIGUOUS filter before LLM evaluation. Saves API calls for obvious cases |
 | **Optional evaluation** | `ENABLE_EVALUATOR=false` skips LLM evaluation entirely (auto-PASS) |
