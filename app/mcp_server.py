@@ -45,7 +45,39 @@ server = Server("deep-research")
 # ── Background task store for long-running deep research
 _research_tasks: dict[str, dict[str, Any]] = {}
 _research_lock = asyncio.Lock()
-_TASK_TTL_SECONDS = 3600  # auto-cleanup after 1 hour
+_TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between sessions
+
+
+def _persist_task(task: dict) -> None:
+    """Save completed task metadata to disk so it survives restarts."""
+    import json as _json
+    report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
+    report_dir.mkdir(parents=True, exist_ok=True)
+    meta_file = report_dir / f"task_{task['task_id']}.json"
+    # Strip report text from disk copy (report is already in the .md file)
+    disk_task = {k: v for k, v in task.items() if k != "report"}
+    with open(meta_file, "w") as f:
+        _json.dump(disk_task, f)
+
+
+def _load_persisted_task(task_id: str) -> dict | None:
+    """Load completed task metadata from disk fallback."""
+    import json as _json
+    report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
+    meta_file = report_dir / f"task_{task_id}.json"
+    if not meta_file.exists():
+        return None
+    try:
+        with open(meta_file) as f:
+            task = _json.load(f)
+        # Read report from disk
+        report_path = task.get("report_path", "")
+        if report_path and Path(report_path).exists():
+            with open(report_path) as f:
+                task["report"] = f.read()
+        return task
+    except Exception:
+        return None
 
 
 @server.list_tools()
@@ -300,6 +332,9 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
             task["char_count"] = len(report)
             task["completed_at"] = time.time()
 
+            # Persist to disk so task survives restart/TTL cleanup
+            _persist_task(task)
+
     except Exception as e:
         logger.exception("Background research failed for task %s", task_id)
         if task:
@@ -373,9 +408,13 @@ async def _handle_research_status(
         task = _research_tasks.get(task_id)
 
     if not task:
+        # Try disk fallback (survives restarts and TTL cleanup)
+        task = await asyncio.to_thread(_load_persisted_task, task_id)
+
+    if not task:
         return [types.TextContent(
             type="text",
-            text=f"## Task Not Found\n\nTask ID `{task_id}` not found. It may have expired (>1 hour old) or never existed."
+            text=f"## Task Not Found\n\nTask ID `{task_id}` not found in memory or on disk.\nIt may never have existed, or the report file was deleted.\n\nCheck `/data/` (in container) or `RESEARCH_OUTPUT_DIR` for saved reports."
         )]
 
     status = task["status"]
