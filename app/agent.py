@@ -118,15 +118,16 @@ def parallel_researcher_node(state: ResearchState) -> dict:
     search_tool = get_search_tool()
     llm = _get_llm()
 
-    result = _research_single_goal(goal, search_tool, llm)
+    finding = _research_single_goal(goal, search_tool, llm)
+    text = finding.to_text()
 
     logger.info(
         "Parallel researcher done: goal=%s... result=%d chars",
         goal[:60],
-        len(result),
+        len(text),
     )
-    print(f"  ✓ [{goal[:60]}...] ({len(result):,} chars)", flush=True)
-    return {"parallel_findings": [result]}
+    print(f"  ✓ [{goal[:60]}...] ({len(text):,} chars)", flush=True)
+    return {"parallel_findings": [text]}
 
 
 # ──────────────────────────────────────────────

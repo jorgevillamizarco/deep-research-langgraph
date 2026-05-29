@@ -44,11 +44,9 @@ Architectural concerns from code review (May 2026). Not blockers — the agent i
 
 ### 2. "Strings Everywhere" Architecture
 
-Nodes pass large text blobs. `parallel_researcher_node` returns a string. `merge_findings_node` concatenates strings. The deliverable searches for regex tags `[DELIVERABLE]` in strings. One node that forgets tag convention breaks Phase 2.
+✅ **PARTIALLY RESOLVED** (May 2026). Added `app/models.py` with `ResearchFinding`, `Citation`, `DeliverableResult`, and `SourceQualityMetrics` Pydantic models. `_research_single_goal()` now returns a typed `ResearchFinding` with pre-extracted citations, preventing the parallel citation loss bug at the type level.
 
-**Ideal:** `parallel_findings: list[ResearchFinding]` with `.citations`, `.confidence`, `.queries` fields. Three-layer DELIVERABLE defense wouldn't be necessary if types enforced tag presence.
-
-**Trade-off:** Refactoring to Pydantic models between nodes is a major rewrite. Defer until a second agent is built that shares the research engine.
+**Remaining:** `parallel_findings` state field is still `list[str]` for LangGraph compatibility. Full migration to typed models between nodes requires a larger refactor of the state schema.
 
 ### 3. Evaluator Reliability
 

@@ -18,6 +18,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import config
+from app.models import Citation, ResearchFinding
 from app.state import ResearchState
 from app.tools.citations import extract_citations_from_content
 from app.tools.search import format_search_results, get_search_tool, fetch_url_content
@@ -44,10 +45,10 @@ def _parse_goals(plan: str) -> dict[str, list[str]]:
     return {"research": research_goals, "deliverable": deliverable_goals}
 
 
-def _research_single_goal(goal: str, search_tool: Any, llm: Any) -> str:
+def _research_single_goal(goal: str, search_tool: Any, llm: Any) -> ResearchFinding:
     """Research a single [RESEARCH] goal: generate queries, search, synthesize.
 
-    Returns a markdown summary string.
+    Returns a structured ResearchFinding with pre-extracted citations.
     """
     # Step 1: Generate 4-5 search queries for this goal
     query_prompt = f"""You are a research specialist. For the following research goal, generate 4-5 highly specific web search queries.
@@ -118,7 +119,28 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
         HumanMessage(content=synthesis_prompt),
     ])
 
-    return f"### Research: {goal}\n\n{synthesis.content.strip()}\n"
+    summary = synthesis.content.strip()
+
+    # Step 4: Extract citations from the synthesized summary
+    # (Pre-extract so they don't get lost in parallel merging)
+    _dummy_sources, _dummy_map = extract_citations_from_content(summary, 0)
+    citations = [
+        Citation(
+            short_id=sid,
+            url=src.get("url", ""),
+            title=src.get("title", ""),
+            domain=src.get("domain", ""),
+            tier=src.get("tier", 3),
+        )
+        for sid, src in _dummy_sources.items()
+    ]
+
+    return ResearchFinding(
+        goal=goal,
+        summary=summary,
+        citations=citations,
+        search_queries=queries,
+    )
 
 
 def _parse_queries(content: str) -> list[str]:
@@ -191,8 +213,8 @@ def researcher_node(state: ResearchState) -> dict:
     research_summaries = []
     for i, goal in enumerate(goals["research"]):
         logger.info("Researching goal %d/%d: %s...", i + 1, len(goals["research"]), goal[:60])
-        summary = _research_single_goal(goal, search_tool, llm)
-        research_summaries.append(summary)
+        finding = _research_single_goal(goal, search_tool, llm)
+        research_summaries.append(finding.to_text())
 
     combined_research = "\n\n---\n\n".join(research_summaries)
 
