@@ -119,19 +119,20 @@ th{{background:#f5f5f5}}</style></head><body>
     return None
 
 
-def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False) -> str:
+def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False, generate_pdf: bool = False) -> str:
     """Execute full deep research workflow from the command line.
 
     Flow:
       1. Generate plan (direct LLM, no graph)
       2. Optional: check cross-run cache for reusable goal findings
       3. Run graph with approved plan + pre-loaded cached findings
-      4. Save and return the final report (markdown + PDF)
+      4. Save and return the final report (markdown + optional PDF)
 
     Args:
         topic: The research topic.
         auto_approve: If True, skip the plan review and execute immediately.
         use_cache: If True, check goal-level cache for reusable findings.
+        generate_pdf: If True, also generate PDF output (requires pandoc + weasyprint).
 
     Returns:
         The final report text.
@@ -297,7 +298,10 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
                 with open(md_path, "w") as f:
                     f.write(report)
 
-                pdf_path = _convert_to_pdf(md_path)
+                if generate_pdf:
+                    pdf_path = _convert_to_pdf(md_path)
+                else:
+                    pdf_path = None
                 saved = True
                 break
             except (PermissionError, OSError):
@@ -374,6 +378,11 @@ def main() -> None:
         help="Use cross-run goal cache (aggressive TTL, delta-validated, opt-in)",
     )
     parser.add_argument(
+        "--pdf",
+        action="store_true",
+        help="Also generate PDF output (requires pandoc + weasyprint)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable debug logging",
@@ -394,7 +403,7 @@ def main() -> None:
         print("\nError: Provide a research topic or --topic-file")
         sys.exit(1)
 
-    run_research(topic, auto_approve=args.auto, use_cache=args.cache)
+    run_research(topic, auto_approve=args.auto, use_cache=args.cache, generate_pdf=args.pdf)
 
 
 if __name__ == "__main__":

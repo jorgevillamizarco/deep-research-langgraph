@@ -30,15 +30,21 @@ def _get_llm() -> Any:
 
 
 def _serialize_sources(sources: dict) -> str:
-    """Serialize sources dict to a compact JSON string for the LLM prompt."""
-    serializable = {}
+    """Serialize sources to a compact JSON string for the LLM prompt.
+
+    Only includes fields the LLM needs for citation (short_id, title, url, tier).
+    Drops verbose metadata (authority_reason, supported_claims) to reduce
+    prompt bloat. With 40+ sources, this can save ~5-10K tokens.
+    """
+    essential_keys = {"short_id", "title", "url", "domain", "tier"}
+    compact = {}
     for sid, src in sources.items():
-        # Convert any non-serializable objects to strings
-        serializable[sid] = {
+        compact[sid] = {
             k: str(v) if not isinstance(v, (str, int, float, bool, list, dict, type(None))) else v
             for k, v in src.items()
+            if k in essential_keys
         }
-    return json.dumps(serializable, indent=2)
+    return json.dumps(compact, indent=2)
 
 
 def composer_node(state: ResearchState) -> dict:
@@ -143,7 +149,7 @@ Just the summary."""
       Tier 1 — academic papers, official docs, government (.gov, .edu, arxiv, IEEE)
       Tier 2 — engineering blogs, industry publications, GitHub repos
       Tier 3 — community forums, news, vendor content
-    Each source in the JSON has its tier and authority_reason. Use this metadata to:
+    Use the tier metadata to:
     - Prefer Tier 1/2 sources for key claims
     - Note when only Tier 3 sources support an important claim
     - Build the Source Quality Assessment section (aggregate counts, not per-citation labels)
