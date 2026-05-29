@@ -231,12 +231,15 @@ async def _handle_deep_research(
     thread_id = f"research-{int(time.time())}"
     thread_config = {"configurable": {"thread_id": thread_id}}
 
-    # Notify progress
-    await server.request_context.session.send_progress_notification(
-        progress_token="research",
-        progress=0.1,
-        total=1.0,
-    )
+    # Notify progress (SSE sessions only; silent no-op on POST)
+    try:
+        await server.request_context.session.send_progress_notification(
+            progress_token="research",
+            progress=0.1,
+            total=1.0,
+        )
+    except Exception:
+        pass
 
     try:
         # Generate plan first (avoids double-entry from stream+resume)
@@ -259,11 +262,14 @@ async def _handle_deep_research(
             or ""
         )
 
-        await server.request_context.session.send_progress_notification(
-            progress_token="research",
-            progress=1.0,
-            total=1.0,
-        )
+        try:
+            await server.request_context.session.send_progress_notification(
+                progress_token="research",
+                progress=1.0,
+                total=1.0,
+            )
+        except Exception:
+            pass
 
         if not report:
             errors = final_values.get("errors", [])
@@ -451,7 +457,7 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                         content.append({"type": "text", "text": item.text})
                     elif isinstance(item, types.EmbeddedResource):
                         content.append({"type": "resource", "resource": {
-                            "uri": item.resource.uri if hasattr(item.resource, 'uri') else "",
+                            "uri": str(item.resource.uri) if hasattr(item.resource, 'uri') else "",
                             "mimeType": item.resource.mimeType if hasattr(item.resource, 'mimeType') else "text/markdown",
                         }})
                 return JSONResponse({
