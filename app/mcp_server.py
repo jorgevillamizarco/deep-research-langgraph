@@ -439,13 +439,36 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                 },
             })
         elif method == "tools/call":
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "content": [{"type": "text", "text": "For full tool execution, connect via SSE at GET /mcp"}],
-                },
-            })
+            # Execute tool via POST (same handler as SSE)
+            tool_name = body.get("params", {}).get("name", "")
+            tool_args = body.get("params", {}).get("arguments", {})
+            try:
+                result = await handle_call_tool(tool_name, tool_args)
+                # Extract text from MCP types for JSON response
+                content = []
+                for item in result:
+                    if isinstance(item, types.TextContent):
+                        content.append({"type": "text", "text": item.text})
+                    elif isinstance(item, types.EmbeddedResource):
+                        content.append({"type": "resource", "resource": {
+                            "uri": item.resource.uri if hasattr(item.resource, 'uri') else "",
+                            "mimeType": item.resource.mimeType if hasattr(item.resource, 'mimeType') else "text/markdown",
+                        }})
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {"content": content, "isError": False},
+                })
+            except Exception as e:
+                logger.exception("tools/call failed via POST")
+                return JSONResponse({
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": {
+                        "content": [{"type": "text", "text": f"Tool execution failed: {e}"}],
+                        "isError": True,
+                    },
+                })
         elif method == "notifications/initialized":
             return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": {}})
         else:
