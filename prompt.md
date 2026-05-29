@@ -1,5 +1,7 @@
 # Build a LangGraph Deep Research Agent
 
+> **Note:** This is the original design prompt used to generate the agent. For the as-built implementation, see the actual source code in `app/`. Key differences: JSON prompting instead of `with_structured_output` (DeepSeek V4 compatibility), two-pass plan generation instead of `interrupt()`, DELIVERABLE failsafe, circuit breaker, and state pruning.
+
 ## Goal
 
 Build a complete, production-ready deep research agent using **LangGraph** that replicates the functionality of the ADK-based `google/adk-samples/python/agents/deep-search` sample. The agent must perform multi-phase research: collaborative planning, parallel web research, iterative refinement with critique loop, and final report synthesis with structured citations.
@@ -311,49 +313,61 @@ def collect_research_sources_node(state: ResearchState) -> dict:
     }
 ```
 
-#### 3c. Evaluator Node (`app/nodes/evaluator.py`)
+#### 3c. Research Evaluator Node (`app/nodes/evaluator.py`)
 
-Uses `Feedback` Pydantic schema for structured output (ADK-aligned):
+Uses **JSON prompting** instead of `with_structured_output` for model compatibility.
+
+**Why JSON prompting:** DeepSeek V4 and many open-source models don't support `response_format` / `with_structured_output`. JSON prompting works universally.
 
 ```python
-from pydantic import BaseModel, Field
-from typing import Literal
+import json
+import re
 
-class Feedback(BaseModel):
-    grade: Literal["pass", "fail"]
-    comment: str = Field(description="Detailed evaluation")
-    follow_up_queries: list[SearchQuery] | None = Field(default=None)
+def _parse_json(text: str) -> dict:
+    """Extract JSON from LLM output with graceful fallback."""
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    raw = m.group(1) if m else text.strip()
+    start, end = raw.find("{"), raw.rfind("}")
+    if start >= 0 and end > start:
+        raw = raw[start:end + 1]
+    return json.loads(raw)
 
 def research_evaluator_node(state: ResearchState) -> dict:
-    """Critique the research findings and generate a structured evaluation."""
+    """Critique the research findings with a numeric rubric."""
+    llm = get_llm()  # plain LLM, no structured output
     
-    llm = get_chat_model()
-    # Use structured output to enforce Feedback schema
-    structured_llm = llm.with_structured_output(Feedback)
+    system = """You are a meticulous quality assurance analyst.
+Evaluate the research findings and return ONLY a JSON object:
+
+{
+  "grade": "pass" or "fail",
+  "source_quality": 1-5,
+  "claim_verification": 1-5,
+  "completeness": 1-5,
+  "comment": "detailed evaluation with specific gaps",
+  "follow_up_queries": [{"search_query": "specific query"}]
+}
+
+STRICT RUBRIC:
+- PASS requires: ALL scores >= 4, at least 3 unique URL citations,
+  at least 1 quantitative finding (number, percentage, benchmark)
+- FAIL otherwise — be specific about what's missing"""
     
-    prompt = f"""
-    You are a meticulous quality assurance analyst.
-    Evaluate the research findings in 'section_research_findings' for the topic: {state['topic']}
-    
-    CRITICAL RULES:
-    1. Assume the given topic is correct. Do not question the subject itself.
-    2. Focus on: comprehensiveness, credible sources, depth of analysis, clarity.
-    3. Do NOT fact-check the premise.
-    
-    Be very critical. If you find significant gaps, grade 'fail', write detailed comment,
-    and generate 5-7 specific follow-up queries.
-    If the research thoroughly covers the topic, grade 'pass'.
-    """
-    
-    evaluation = structured_llm.invoke([
-        SystemMessage(content=prompt),
-        HumanMessage(content=f"Findings:\n{state['section_research_findings']}")
+    response = llm.invoke([
+        SystemMessage(content=system),
+        HumanMessage(content=f"Topic: {state['topic']}\nFindings:\n{state['section_research_findings']}")
     ])
     
-    return {"research_evaluation": evaluation}
+    try:
+        data = _parse_json(response.content)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning("JSON parse failure, using fallback")
+        data = {"grade": "fail", "comment": "Parse error"}
+    
+    return {"research_evaluation": data}
 ```
 
-**Better alternative**: Use LangGraph's built-in structured output support with output_schema on node, or use bind_tools with Pydantic model.
+**Fallback pattern:** If JSON parsing fails, default to FAIL with a parse error comment — the enhancer will run follow-up queries and the evaluator gets another chance. Never crash the pipeline on parse failure.
 
 #### 3d. Enhanced Search Executor Node (`app/nodes/enhancer.py`)
 
@@ -614,7 +628,7 @@ The graph can also be loaded in LangGraph Studio for visual debugging and human-
 
 2. **Subgraph for refinement loop** — The iterative critic → enhancer loop is a natural subgraph boundary. It isolates the loop logic (max iterations, escalation check) from the main pipeline. This mirrors ADK's `LoopAgent` pattern.
 
-3. **Pydantic models for structured output** — `<model>.with_structured_output(Feedback)` ensures the evaluator returns valid JSON. This is directly equivalent to ADK's `output_schema=FeedbacK`.
+3. **JSON prompting over `with_structured_output`** — DeepSeek V4 does not support `response_format`. The evaluator uses JSON prompting with manual parsing and graceful fallback (defaulting to FAIL on parse errors). This works universally across all model providers without requiring proprietary features.
 
 4. **Interrupts for plan approval** — LangGraph's built-in `interrupt()` is cleaner than ADK's manual user input handling. It provides checkpoint-based persistence: the graph state is saved, the interrupt fires, and the user can resume later with `Command(resume=...)`.
 
