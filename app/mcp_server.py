@@ -71,24 +71,6 @@ and any question answerable with a single search.""",
                 },
                 "required": ["query"],
             },
-            outputSchema={
-                "type": "object",
-                "description": "Markdown-formatted search results with numbered entries, each containing a linked title, URL, and up to 500 chars of snippet text.",
-                "properties": {
-                    "results": {
-                        "type": "array",
-                        "description": "Search result entries",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "title": {"type": "string", "description": "Result title as a markdown link [Title](URL)"},
-                                "url": {"type": "string", "description": "Source URL"},
-                                "snippet": {"type": "string", "description": "Up to 500 characters of the result snippet/text"},
-                            },
-                        },
-                    },
-                },
-            },
         ),
         types.Tool(
             name="deep_research",
@@ -130,47 +112,6 @@ NOT FOR: simple fact lookups (use search tool), real-time data (stock prices, we
                     },
                 },
                 "required": ["topic"],
-            },
-            outputSchema={
-                "type": "object",
-                "description": "Structured markdown research report with inline citations, confidence levels, and source quality tiers.",
-                "properties": {
-                    "format": {"type": "string", "description": "Full markdown with inline citations as [Title](URL)"},
-                    "sections": {
-                        "type": "array",
-                        "description": "Report sections in order",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "executive_summary": {"type": "string", "description": "Synthesis with overall confidence (high/moderate/low)"},
-                                "source_quality_assessment": {"type": "string", "description": "Breakdown of Tier 1 (authoritative), Tier 2 (credible), Tier 3 (supplementary) sources"},
-                                "cross_cutting_themes": {"type": "string", "description": "Themes spanning sources with contradiction notes"},
-                                "research_findings": {"type": "string", "description": "Per-goal findings with [CONFIDENCE:1-5] per claim"},
-                                "methodology": {"type": "string", "description": "Research process, non-fatal errors, evaluation scores, cached goal count"},
-                            },
-                        },
-                    },
-                    "features": {
-                        "type": "array",
-                        "description": "Quality annotations in the report",
-                        "items": {"type": "string", "enum": [
-                            "per-claim confidence [CONFIDENCE:1-5]",
-                            "source tier classification (T1/T2/T3)",
-                            "contradiction detection with hedge language",
-                            "quantitative findings with data points",
-                            "inline markdown citations",
-                        ]},
-                    },
-                    "delivery": {
-                        "type": "object",
-                        "description": "Output files produced",
-                        "properties": {
-                            "markdown_path": {"type": "string", "description": "Absolute path to the .md report file"},
-                            "pdf_path": {"type": "string", "description": "Absolute path to the .pdf report file if PDF generation succeeded, null otherwise"},
-                            "char_count": {"type": "integer", "description": "Approximate character count of the markdown report"},
-                        },
-                    },
-                },
             },
         ),
     ]
@@ -481,23 +422,6 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                                 },
                                 "required": ["query"],
                             },
-                            "outputSchema": {
-                                "type": "object",
-                                "description": "Markdown-formatted search results with numbered entries.",
-                                "properties": {
-                                    "results": {
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "title": {"type": "string", "description": "Markdown link [Title](URL)"},
-                                                "url": {"type": "string"},
-                                                "snippet": {"type": "string", "description": "Up to 500 chars"},
-                                            },
-                                        },
-                                    },
-                                },
-                            },
                         },
                         {
                             "name": "deep_research",
@@ -509,23 +433,6 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                                     "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 3)", "default": 3},
                                 },
                                 "required": ["topic"],
-                            },
-                            "outputSchema": {
-                                "type": "object",
-                                "description": "Structured markdown report with inline citations, confidence levels, and source quality tiers.",
-                                "properties": {
-                                    "format": {"type": "string", "description": "Full markdown with [Title](URL) citations"},
-                                    "sections": {"type": "array", "description": "executive_summary, source_quality_assessment, cross_cutting_themes, research_findings, methodology"},
-                                    "features": {"type": "array", "description": "per-claim confidence [CONFIDENCE:1-5], source tiers T1/T2/T3, contradiction detection, quantitative data points"},
-                                    "delivery": {
-                                        "type": "object",
-                                        "properties": {
-                                            "markdown_path": {"type": "string", "description": "Path to .md file"},
-                                            "pdf_path": {"type": "string", "description": "Path to .pdf file or null"},
-                                            "char_count": {"type": "integer", "description": "Report length in characters"},
-                                        },
-                                    },
-                                },
                             },
                         },
                     ]
