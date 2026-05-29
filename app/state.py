@@ -139,6 +139,9 @@ class ResearchState(TypedDict):
     Each entry: {iteration, source_quality, claim_verification, completeness}."""
     total_tokens: Annotated[int, operator.add]
     """Total LLM tokens consumed across all nodes (accumulated via operator.add)."""
+    token_breakdown: Annotated[dict[str, int], operator.or_]
+    """Per-node token breakdown, e.g. {'planner': 1200, 'researcher': 5400}.
+    Accumulated via operator.or_ (dict merge) across node returns."""
     cached_goal_count: int
     """Number of goals served from cache (0 if --cache not used)."""
     depth: str

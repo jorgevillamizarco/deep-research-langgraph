@@ -26,7 +26,8 @@ def _get_llm() -> Any:
     from app.tokens import get_llm
     return get_llm(model=config.worker_model, temperature=0.2,
                    api_key=config.worker_api_key or None,
-                   base_url=config.worker_api_base or None)
+                   base_url=config.worker_api_base or None,
+                   node_name="composer")
 
 
 def _serialize_sources(sources: dict) -> str:

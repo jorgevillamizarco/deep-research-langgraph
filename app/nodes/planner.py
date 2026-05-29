@@ -34,7 +34,7 @@ def _get_llm() -> Any:
     from app.tokens import get_llm
     return get_llm(model=config.worker_model, temperature=0.1,
                    api_key=config.worker_api_key or None,
-                   base_url=config.worker_api_base or None)
+                   base_url=config.worker_api_base or None, node_name="planner")
 
 
 def _generate_plan(topic: str, previous_plan: str | None, user_feedback: str | None,

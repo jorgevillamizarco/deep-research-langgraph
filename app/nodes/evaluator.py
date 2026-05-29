@@ -57,7 +57,7 @@ def _get_llm() -> Any:
 
     return get_llm(model=config.critic_model, temperature=0.1,
                    api_key=config.critic_api_key or config.worker_api_key or None,
-                   base_url=config.critic_api_base or config.worker_api_base or None)
+                   base_url=config.critic_api_base or config.worker_api_base or None, node_name="evaluator")
 
 
 def _parse_feedback_json(text: str) -> Feedback | None:

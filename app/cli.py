@@ -159,6 +159,7 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
             "errors": [],
             "evaluation_scores": [],
             "total_tokens": 0,
+            "token_breakdown": {},
             "cached_goal_count": 0,
         }
 
@@ -288,6 +289,12 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
                 total_tokens_val = final_state.get("total_tokens", 0)
                 if total_tokens_val:
                     print(f"  Tokens:   {total_tokens_val:,}")
+                breakdown = final_state.get("token_breakdown", {})
+                if breakdown:
+                    print(f"  Breakdown:")
+                    for node, tokens in sorted(breakdown.items(), key=lambda x: -x[1]):
+                        pct = (tokens / total_tokens_val * 100) if total_tokens_val else 0
+                        print(f"    {node:20s} {tokens:>6,} tokens  ({pct:5.1f}%)")
         except Exception:
             pass  # Token reporting is non-critical
         print()
@@ -311,6 +318,15 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
 
 def main() -> None:
     """CLI entry point."""
+    # Validate config before anything else
+    issues = config.validate()
+    if issues:
+        for issue in issues:
+            print(f"[CONFIG] {issue}", file=sys.stderr)
+        # Block if critical (missing API key or base)
+        if any("WORKER_API_KEY" in i or "WORKER_API_BASE" in i for i in issues):
+            print("[FATAL] Missing required configuration. Set environment variables and retry.", file=sys.stderr)
+            sys.exit(1)
     parser = argparse.ArgumentParser(
         description="Deep Research Agent — LangGraph-based multi-phase research"
     )

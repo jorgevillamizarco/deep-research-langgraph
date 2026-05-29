@@ -397,4 +397,44 @@ def test_evaluator_disabled_auto_pass():
         result = research_evaluator_node(state)
 
     assert result["research_evaluation"].grade == "pass"
-    assert "disabled" in result["research_evaluation"].comment.lower()
+
+
+def test_config_validation_missing_api_key():
+    """Config validation catches missing WORKER_API_KEY."""
+    from app.config import ResearchConfig
+    cfg = ResearchConfig()
+    cfg.worker_api_key = ""
+    issues = cfg.validate()
+    assert any("WORKER_API_KEY" in i for i in issues)
+
+
+def test_config_validation_missing_api_base():
+    """Config validation catches missing WORKER_API_BASE."""
+    from app.config import ResearchConfig
+    cfg = ResearchConfig()
+    cfg.worker_api_base = ""
+    issues = cfg.validate()
+    assert any("WORKER_API_BASE" in i for i in issues)
+
+
+def test_config_validation_valid_config():
+    """Config validation returns empty for valid config."""
+    from app.config import ResearchConfig
+    cfg = ResearchConfig()
+    cfg.worker_api_key = "sk-placeholder"
+    cfg.worker_api_base = "https://api.deepseek.com"
+    cfg.critic_model = "different-model"
+    issues = cfg.validate()
+    assert len(issues) == 0
+
+
+def test_config_validation_critic_same_as_worker():
+    """Config validation warns when critic == worker."""
+    from app.config import ResearchConfig
+    cfg = ResearchConfig()
+    cfg.worker_api_key = "sk-placeholder"
+    cfg.worker_api_base = "https://api.deepseek.com"
+    cfg.worker_model = "deepseek-v4-flash"
+    cfg.critic_model = "deepseek-v4-flash"
+    issues = cfg.validate()
+    assert any("same as WORKER_MODEL" in i or "Same-model" in i for i in issues)

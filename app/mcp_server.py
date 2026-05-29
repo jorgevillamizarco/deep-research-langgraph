@@ -822,6 +822,16 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
+    # Validate config at startup
+    from app.config import config as app_config
+    issues = app_config.validate()
+    for issue in issues:
+        logging.warning("Config: %s", issue)
+    critical = [i for i in issues if "WORKER_API_KEY" in i or "WORKER_API_BASE" in i]
+    if critical:
+        logging.error("Cannot start: missing required configuration")
+        sys.exit(1)
+
     if args.transport == "stdio":
         asyncio.run(_run_stdio())
     else:

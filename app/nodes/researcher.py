@@ -190,7 +190,8 @@ def _get_llm() -> Any:
     """Get the chat model for research."""
     from app.tokens import get_llm
     return get_llm(model=config.worker_model, api_key=config.worker_api_key or None,
-                   base_url=config.worker_api_base or None, temperature=0.2)
+                   base_url=config.worker_api_base or None, temperature=0.2,
+                   node_name="researcher")
 
 
 def researcher_node(state: ResearchState) -> dict:
