@@ -45,11 +45,10 @@ server = Server("deep-research")
 # ── Background task store for long-running deep research
 _research_tasks: dict[str, dict[str, Any]] = {}
 _research_lock = asyncio.Lock()
-_TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between sessions
-
-# ── SSE streaming: task_id → asyncio.Queue of progress events
 _stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _stream_lock = asyncio.Lock()
+_main_event_loop: asyncio.AbstractEventLoop | None = None  # Set at server startup
+_TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between restarts
 
 
 def _get_report_dir() -> Path:
@@ -281,9 +280,12 @@ async def _handle_search(
 
 def _push_stream_event(task_id: str, event: dict[str, Any]) -> None:
     """Push a progress event to the SSE stream queue for a task (thread-safe)."""
-    loop = asyncio.get_event_loop()
+    # Use the stored event loop from server startup — get_event_loop()
+    # fails in background threads on Python 3.12+
+    loop = _main_event_loop
+    if loop is None:
+        return
     if task_id in _stream_queues:
-        # Use call_soon_threadsafe to push from background thread
         q = _stream_queues[task_id]
         loop.call_soon_threadsafe(q.put_nowait, event)
 
@@ -554,6 +556,9 @@ async def _run_stdio():
 
 async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
     """Run with SSE/HTTP transport (for Docker deployment)."""
+    global _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
+
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.responses import Response, JSONResponse
