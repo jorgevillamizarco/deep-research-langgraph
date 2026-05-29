@@ -84,12 +84,20 @@ Return ONLY a JSON array of strings, one query per item. Example:
             logger.warning("Search failed for query %r: %s", query, e)
             search_results.append(f"### Search Results: {query}\nSearch failed: {e}\n")
 
-    # Step 2b: Fetch full content from top URLs (browser-level research)
+    # Step 2b: Fetch full content from top URLs with browser for the #1 result
+    # HTTP for all 3 (fast), browser with link-following for the first (deep)
     fetched_content = []
-    for url in all_urls[:3]:  # max 3 pages to avoid timeouts
+    for i, url in enumerate(all_urls[:3]):
         content = fetch_url_content(url, max_chars=5000)
         if content:
             fetched_content.append(f"## Source: {url}\n\n{content}\n")
+        # For the top result, also try browser with link-following for richer context
+        if i == 0 and content and len(content) < 3000:
+            # HTTP gave sparse content — browser might find more
+            from app.tools.search import _fetch_via_browser
+            browser_content = _fetch_via_browser(url, max_chars=5000, follow_links=1)
+            if browser_content and len(browser_content) > len(content):
+                fetched_content[-1] = f"## Source (browser): {url}\n\n{browser_content[:5000]}\n"
     if fetched_content:
         search_results.append("\n\n### Full-Page Content\n" + "\n".join(fetched_content))
 
@@ -121,6 +129,11 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
 
     summary = synthesis.content.strip()
 
+    # Step 3b: Verification pass — cross-check findings with targeted search
+    verification_note = _verify_findings(goal, summary, search_tool)
+    if verification_note:
+        summary += "\n\n" + verification_note
+
     # Step 4: Extract citations from the synthesized summary
     # (Pre-extract so they don't get lost in parallel merging)
     _dummy_sources, _dummy_map = extract_citations_from_content(summary, 0)
@@ -140,6 +153,65 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
         citations=citations,
         search_queries=queries,
     )
+
+
+def _verify_findings(goal: str, summary: str, search_tool: Any) -> str:
+    """Run a targeted verification search to catch domain mismatches.
+
+    Generates a disambiguating query that includes the goal plus contextual
+    keywords from the synthesis. If the verification surfaces significantly
+    different information, returns a verification note to append.
+
+    This catches errors like finding "PRR (manufacturing review)" when the
+    user meant "PRR (software production readiness)."
+    """
+    import re
+
+    # Extract key terms from synthesis for cross-reference
+    summary_lower = summary.lower()
+    # Domain-specific disambiguation terms to try
+    disambiguators = []
+    if any(t in summary_lower for t in ["manufacturing", "supply chain", "hardware", "production line"]):
+        disambiguators.append("software engineering")
+    if any(t in summary_lower for t in ["military", "defense", "acquisition", "weapon"]):
+        disambiguators.append("software development")
+
+    if not disambiguators:
+        # No concerning terms found — skip verification (avoid noise)
+        return ""
+
+    # Build verification query: original goal + disambiguation
+    verify_query = f"{goal} {' '.join(disambiguators)}"
+    logger.info("Verification pass: searching %r", verify_query[:80])
+
+    try:
+        results = search_tool.invoke({"query": verify_query, "max_results": 3})
+        if not results:
+            return ""
+
+        # Quick synthesis of verification results
+        result_text = "\n".join(
+            f"- {r.get('title', '')}: {r.get('content', r.get('snippet', ''))[:300]}"
+            for r in results[:3]
+        )
+
+        # Check if verification results are substantially different
+        result_lower = result_text.lower()
+        if any(t in result_lower for t in ["software", "devops", "deployment", "monitoring", "observability"]):
+            note = (
+                "## Verification Note\n\n"
+                "A cross-check search suggests the findings above may describe a different domain "
+                "than intended. A targeted verification search found:\n\n"
+                f"{result_text}\n\n"
+                "Consider whether these alternative interpretations apply to the original question."
+            )
+            logger.info("Verification found alternative domain context")
+            return note
+
+    except Exception as e:
+        logger.debug("Verification search failed: %s", e)
+
+    return ""
 
 
 def _parse_queries(content: str) -> list[str]:

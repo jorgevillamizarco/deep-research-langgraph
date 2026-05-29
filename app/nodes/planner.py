@@ -54,6 +54,11 @@ Maintain the original sequential order. Current date: {today}"""
 Each goal MUST start with: [RESEARCH] or [DELIVERABLE]. RESEARCH goals start with verbs like 'Analyze', 'Identify', 'Investigate'.
 DELIVERABLE goals describe synthesis/output artifacts. Keep each goal concise (1-2 sentences).
 
+DOMAIN DISAMBIGUATION: If the topic mentions terms with multiple meanings across different domains
+(e.g., "PRR" could be DoD manufacturing review or software production readiness review, "pipeline" could be CI/CD or data processing),
+add at least one RESEARCH goal that explicitly investigates the term in the context of the topic's domain.
+For example: "[RESEARCH] Investigate how Production Readiness Review (PRR) is applied in software engineering contexts."
+
 CRITICAL: Include at least 1-2 [DELIVERABLE] goals. These are synthesis artifacts (comparison matrices, decision frameworks,
 ranked lists, summary tables) built from the research findings. A plan with only [RESEARCH] goals is INCOMPLETE.
 
