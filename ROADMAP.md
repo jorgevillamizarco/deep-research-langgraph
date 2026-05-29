@@ -30,7 +30,7 @@
 - [x] Writable directory fallback chain (RESEARCH_OUTPUT_DIR → ~/research → cwd)
 - [x] LLM timeout/retry (timeout=60s, max_retries=2)
 - [x] WeasyPrint CSS warning suppression
-- [ ] Self-documenting MCP tools (~~outputSchema~~ — reverted: Hermes enforces it on results, tools return markdown text not JSON)
+- [x] Self-documenting MCP tools (rich descriptions with HOW IT WORKS/OUTPUT FORMAT/TOPIC GUIDANCE; outputSchema removed — Hermes enforces it on results)
 
 ## Technical Debt & Known Issues
 
@@ -38,12 +38,13 @@ Architectural concerns from code review (May 2026). Not blockers — the agent i
 
 ### 1. Test Coverage vs Complexity
 
-✅ **RESOLVED** (May 2026). Added E2E integration test (`tests/test_integration.py`) that mocks LLM and search tool, runs full graph pipeline, and verifies parallel research → merge → refinement → composer path. 16 total tests (15 unit + 1 E2E).
+✅ **RESOLVED** (May 2026). Added E2E integration test suite (`tests/test_integration.py`) with 4 scenarios:
+- Happy path: parallel research → merge → PASS → composer
+- Enhancer loop: evaluator FAILs, enhancer runs, deliverable regenerates, PASS on retry
+- Circuit breaker: identical FAIL scores trigger stagnation detection → force PASS
+- Brief mode: `depth=brief` produces short executive summary
 
-**Remaining gaps (post-resolution):**
-- E2E test only runs happy path (immediate PASS). Missing scenarios: enhancer loop on FAIL, circuit breaker on stagnation, brief mode executive summary.
-- `_serialize_sources` function, brief mode composer path, multi-model critic vs worker distinction untested.
-- FakeLLM doesn't exercise the evaluator LLM path or enhancer regeneration path.
+23 total tests (19 unit + 4 E2E). All scenarios mock LLM and search tool, running in ~10 seconds.
 
 ### 2. "Strings Everywhere" Architecture
 
@@ -162,14 +163,7 @@ Multiple research agents collaborating on a large topic. Planner distributes sub
 
 ### Browser-based research
 
-Current agent uses web search + text extraction (top 3 URLs, 5K chars each). Adding browser-based research would unlock:
-
-- **JavaScript-rendered content** — SPAs, dashboards, interactive tools (Playwright/Puppeteer node)
-- **Paywalled articles** — Medium, WSJ (archive.is fallback or authenticated sessions)
-- **Structured data extraction** — tables, charts, APIs embedded in pages
-- **Multi-page workflows** — search form → results → detail pages → extraction
-
-This is the single highest-leverage improvement for research depth on modern web content.
+✅ Done (May 2026). Two-stage extraction: HTTP first (fast, static pages), Playwright+Chromium fallback for JS-rendered pages. Graceful degradation if Playwright not installed.
 
 ## Skills Captured
 
