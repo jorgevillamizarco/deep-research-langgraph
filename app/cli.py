@@ -80,6 +80,12 @@ def _convert_to_pdf(md_path: Path) -> Path | None:
             capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0 and pdf_path.exists():
+            # Suppress benign WeasyPrint CSS warnings (e.g. overflow-x not supported)
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    if "unknown property" in line.lower() or "ignored" in line.lower():
+                        continue
+                    logger.debug("pandoc/weasyprint: %s", line)
             return pdf_path
         logger.warning("Pandoc PDF conversion failed: %s", result.stderr[:200])
     except FileNotFoundError:
@@ -96,7 +102,7 @@ def _convert_to_pdf(md_path: Path) -> Path | None:
 <style>body{{font-family:system-ui,sans-serif;max-width:800px;margin:auto;padding:20px;line-height:1.6;color:#1a1a1a}}
 h1{{border-bottom:2px solid #333;padding-bottom:8px}}h2{{border-bottom:1px solid #ccc;padding-bottom:4px}}
 a{{color:#0366d6}}code{{background:#f5f5f5;padding:2px 6px;border-radius:3px}}
-pre{{background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto}}
+pre{{background:#f5f5f5;padding:12px;border-radius:6px}}
 blockquote{{border-left:4px solid #ccc;margin-left:0;padding-left:16px;color:#666}}
 table{{border-collapse:collapse;width:100%}}th,td{{border:1px solid #ddd;padding:8px;text-align:left}}
 th{{background:#f5f5f5}}</style></head><body>
