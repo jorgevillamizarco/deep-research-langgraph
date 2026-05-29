@@ -164,6 +164,7 @@ def test_full_pipeline_with_mocked_llm():
         unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
         unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
         unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+        unittest.mock.patch("app.nodes.evaluator.config.enable_evaluator", True),  # Override env var
     ):
         mock_search_tool = unittest.mock.MagicMock()
         mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
@@ -276,6 +277,7 @@ def test_enhancer_loop():
         unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
         unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
         unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+        unittest.mock.patch("app.nodes.evaluator.config.enable_evaluator", True),  # Override env var
     ):
         mock_search_tool = unittest.mock.MagicMock()
         mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
@@ -359,6 +361,7 @@ def test_circuit_breaker():
         unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
         unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
         unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+        unittest.mock.patch("app.nodes.evaluator.config.enable_evaluator", True),  # Override env var
     ):
         mock_search_tool = unittest.mock.MagicMock()
         mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
@@ -428,6 +431,7 @@ def test_brief_mode():
         unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
         unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
         unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+        unittest.mock.patch("app.nodes.evaluator.config.enable_evaluator", True),  # Override env var
     ):
         mock_search_tool = unittest.mock.MagicMock()
         mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
