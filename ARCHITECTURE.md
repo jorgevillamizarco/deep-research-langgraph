@@ -379,8 +379,8 @@ deep-research-langgraph/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
 │       └── citations.py      # URL extraction, tier annotation, tag replacement
 ├── tests/
-│   ├── test_agent.py         # 15 unit tests
-│   └── test_integration.py   # E2E integration test (mocked LLM + search)
+│   ├── test_agent.py         # 19 unit tests
+│   └── test_integration.py   # 4 E2E scenarios (happy path, enhancer loop, circuit breaker, brief mode)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── deploy.sh                 # One-command deploy with SearXNG detection

@@ -178,7 +178,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Brief mode** | `depth: "brief"` produces 2-3 paragraph executive summary instead of full report |
 | **Typed models** | `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable` Pydantic types |
 | **Live progress** | Research status shows actual pipeline stage %, not just stuck at 20%. Uses `graph.stream()` for per-node progress mapping |
-| **E2E integration test** | `tests/test_integration.py` mocks LLM + search, runs full graph pipeline |
+| **E2E integration test** | `tests/test_integration.py` mocks LLM + search, runs full graph pipeline (4 scenarios: happy path, enhancer loop, circuit breaker, brief mode) |
 ## Quality Pipeline
 
 ```mermaid

@@ -44,6 +44,8 @@ class FakeLLM:
         # Check most-specific patterns first
         if "report composer" in text_lower or ("citation" in text_lower and "compose" in text_lower):
             return "composer"
+        if "research specialist filling" in text_lower or "supplementary findings" in text_lower:
+            return "enhancer"
         if "source_quality" in text_lower or ("rubric" in text_lower and "evaluate" in text_lower):
             return "evaluator"
         if "produce research deliverables" in text_lower or "deliverable goal" in text_lower:
@@ -161,6 +163,7 @@ def test_full_pipeline_with_mocked_llm():
     with (
         unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
         unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
+        unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
     ):
         mock_search_tool = unittest.mock.MagicMock()
         mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
@@ -234,3 +237,242 @@ def test_full_pipeline_with_mocked_llm():
     print(f"  LLM calls: {fake_llm.call_log}")
     print(f"  Report: {len(report)} chars")
     print(f"  Sources: {len(sources)}")
+
+
+# ────────────────────────────────────────────────────────────
+# Scenario: Enhancer Loop (FAIL → PASS)
+# ────────────────────────────────────────────────────────────
+
+
+class EnhancerLoopFakeLLM(FakeLLM):
+    """FakeLLM where evaluator FAILS first, then PASSES after enhancer."""
+
+    def __init__(self):
+        super().__init__()
+        self._evaluator_calls = 0
+
+    def _response_for(self, node: str) -> str:
+        if node == "evaluator":
+            self._evaluator_calls += 1
+            if self._evaluator_calls == 1:
+                # First call: FAIL with specific scores
+                return '{"grade": "fail", "comment": "Scores: source_quality=2/5, claim_verification=3/5, completeness=2/5. Research lacks quantitative data and diverse sources.", "follow_up_queries": [{"search_query": "LangGraph state pruning benchmarks"}]}'
+            else:
+                # After enhancer: PASS
+                return '{"grade": "pass", "comment": "Scores: source_quality=5/5, claim_verification=4/5, completeness=5/5. Enriched with performance data.", "follow_up_queries": []}'
+        if node == "enhancer":
+            return "## Enhanced Research\n\nAdditional finding: State pruning reduces latency by 40%. [CONFIDENCE:5/5]\nSource: https://benchmark.example.com/langgraph\n"
+        return super()._response_for(node)
+
+
+def test_enhancer_loop():
+    """E2E: enhancer runs after FAIL, deliverable regenerates, PASS on retry."""
+    from app.agent import build_research_graph, MemorySaver
+    from app.tools import search as search_module
+
+    fake_llm = EnhancerLoopFakeLLM()
+
+    with (
+        unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
+        unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
+        unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+    ):
+        mock_search_tool = unittest.mock.MagicMock()
+        mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
+        mock_get_search.return_value = mock_search_tool
+
+        graph = build_research_graph(checkpointer=MemorySaver())
+
+        state: ResearchState = {
+            "topic": "LangGraph state pruning",
+            "plan_approved": True,
+            "user_feedback": None,
+            "research_plan": "[RESEARCH] State pruning techniques\n[DELIVERABLE] Best practices guide",
+            "report_sections": "## Introduction\n## Findings\n## Conclusion",
+            "section_research_findings": None,
+            "research_evaluation": None,
+            "research_iteration": 0,
+            "url_to_short_id": {},
+            "sources": {},
+            "final_cited_report": None,
+            "final_report_with_citations": None,
+            "messages": [],
+            "errors": [],
+            "iteration_count": 0,
+            "max_iterations": 3,
+            "current_goal": "",
+            "parallel_goals": ["Research LangGraph state pruning patterns"],
+            "evaluation_scores": [],
+            "total_tokens": 0,
+            "token_breakdown": {},
+            "cached_goal_count": 0,
+            "depth": "standard",
+            "parallel_findings": [],
+        }
+
+        result = graph.invoke(state, {"configurable": {"thread_id": "test-enhancer-loop"}})
+
+    # Verify enhancer was called
+    enhancer_calls = [c for c in fake_llm.call_log if c == "enhancer"]
+    assert enhancer_calls, f"Expected enhancer call, got: {fake_llm.call_log}"
+
+    # Verify evaluator was called twice (FAIL then PASS)
+    evaluator_calls = [c for c in fake_llm.call_log if c == "evaluator"]
+    assert len(evaluator_calls) == 2, f"Expected 2 evaluator calls, got {len(evaluator_calls)}: {fake_llm.call_log}"
+
+    # Verify report was generated (after passing)
+    report = result.get("final_report_with_citations", "")
+    assert report, "No report generated"
+    assert len(report) > 100, f"Report too short: {len(report)} chars"
+
+    print(f"\nEnhancer loop test passed:")
+    print(f"  LLM calls: {fake_llm.call_log}")
+    print(f"  Evaluator calls: {len(evaluator_calls)}")
+    print(f"  Enhancer calls: {len(enhancer_calls)}")
+    print(f"  Report: {len(report)} chars")
+
+
+# ────────────────────────────────────────────────────────────
+# Scenario: Circuit Breaker (score stagnation → force PASS)
+# ────────────────────────────────────────────────────────────
+
+
+class CircuitBreakerFakeLLM(FakeLLM):
+    """FakeLLM where evaluator returns same FAIL scores — triggers circuit breaker."""
+
+    def _response_for(self, node: str) -> str:
+        if node == "evaluator":
+            return '{"grade": "fail", "comment": "Scores: source_quality=3/5, claim_verification=3/5, completeness=3/5. Moderate quality but insufficient.", "follow_up_queries": [{"search_query": "LangGraph benchmarks"}]}'
+        if node == "enhancer":
+            return "## Enhancement\n\nAdditional but insufficient data. [CONFIDENCE:2/5]\n"
+        return super()._response_for(node)
+
+
+def test_circuit_breaker():
+    """E2E: circuit breaker forces pass after score stagnation."""
+    from app.agent import build_research_graph, MemorySaver
+    from app.tools import search as search_module
+
+    fake_llm = CircuitBreakerFakeLLM()
+
+    with (
+        unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
+        unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
+        unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+    ):
+        mock_search_tool = unittest.mock.MagicMock()
+        mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
+        mock_get_search.return_value = mock_search_tool
+
+        graph = build_research_graph(checkpointer=MemorySaver())
+
+        state: ResearchState = {
+            "topic": "LangGraph checkpointing",
+            "plan_approved": True,
+            "user_feedback": None,
+            "research_plan": "[RESEARCH] Checkpointing patterns\n[DELIVERABLE] Guide",
+            "report_sections": "## Overview\n## Patterns\n## Summary",
+            "section_research_findings": None,
+            "research_evaluation": None,
+            "research_iteration": 0,
+            "url_to_short_id": {},
+            "sources": {},
+            "final_cited_report": None,
+            "final_report_with_citations": None,
+            "messages": [],
+            "errors": [],
+            "iteration_count": 0,
+            "max_iterations": 5,
+            "current_goal": "",
+            "parallel_goals": ["Research checkpointing backends"],
+            "evaluation_scores": [],
+            "total_tokens": 0,
+            "token_breakdown": {},
+            "cached_goal_count": 0,
+            "depth": "standard",
+            "parallel_findings": [],
+        }
+
+        result = graph.invoke(state, {"configurable": {"thread_id": "test-circuit-breaker"}})
+
+    # Verify pipeline completed (circuit breaker forced pass)
+    report = result.get("final_report_with_citations", "")
+    assert report, "No report — circuit breaker should force pass despite FAIL"
+    assert len(report) > 100, f"Report too short: {len(report)} chars"
+
+    # Verify we didn't loop forever
+    enhancer_calls = [c for c in fake_llm.call_log if c == "enhancer"]
+    evaluator_calls = [c for c in fake_llm.call_log if c == "evaluator"]
+    assert len(enhancer_calls) <= 3, f"Too many enhancer calls: {len(enhancer_calls)}"
+
+    print(f"\nCircuit breaker test passed:")
+    print(f"  LLM calls: {fake_llm.call_log}")
+    print(f"  Evaluator calls: {len(evaluator_calls)}")
+    print(f"  Enhancer calls: {len(enhancer_calls)}")
+    print(f"  Report: {len(report)} chars")
+
+
+# ────────────────────────────────────────────────────────────
+# Scenario: Brief Mode (short executive summary)
+# ────────────────────────────────────────────────────────────
+
+
+def test_brief_mode():
+    """E2E: brief mode produces concise executive summary."""
+    from app.agent import build_research_graph, MemorySaver
+    from app.tools import search as search_module
+
+    fake_llm = FakeLLM()
+
+    with (
+        unittest.mock.patch("app.tokens.get_llm", return_value=fake_llm),
+        unittest.mock.patch.object(search_module, "get_search_tool") as mock_get_search,
+        unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=None),  # Force LLM evaluator
+    ):
+        mock_search_tool = unittest.mock.MagicMock()
+        mock_search_tool.invoke = unittest.mock.MagicMock(side_effect=fake_search_tool)
+        mock_get_search.return_value = mock_search_tool
+
+        graph = build_research_graph(checkpointer=MemorySaver())
+
+        state: ResearchState = {
+            "topic": "LangGraph checkpointing",
+            "plan_approved": True,
+            "user_feedback": None,
+            "research_plan": "[RESEARCH] Checkpointing\n[DELIVERABLE] Summary",
+            "report_sections": "## Summary",
+            "section_research_findings": None,
+            "research_evaluation": None,
+            "research_iteration": 0,
+            "url_to_short_id": {},
+            "sources": {},
+            "final_cited_report": None,
+            "final_report_with_citations": None,
+            "messages": [],
+            "errors": [],
+            "iteration_count": 0,
+            "max_iterations": 2,
+            "current_goal": "",
+            "parallel_goals": ["Research LangGraph persistence"],
+            "evaluation_scores": [],
+            "total_tokens": 0,
+            "token_breakdown": {},
+            "cached_goal_count": 0,
+            "depth": "brief",
+            "parallel_findings": [],
+        }
+
+        result = graph.invoke(state, {"configurable": {"thread_id": "test-brief-mode"}})
+
+    report = result.get("final_report_with_citations", "")
+    assert report, "No report generated"
+
+    # Brief mode should produce shorter output
+    assert len(report) < 1000, f"Brief report should be short, got {len(report)} chars"
+
+    # Brief mode should not have full section headers
+    assert "## Executive Summary" not in report, f"Unexpected headers in brief: {report[:100]}"
+
+    print(f"\nBrief mode test passed:")
+    print(f"  LLM calls: {fake_llm.call_log}")
+    print(f"  Report: {len(report)} chars")
