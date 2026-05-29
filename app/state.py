@@ -141,3 +141,5 @@ class ResearchState(TypedDict):
     """Total LLM tokens consumed across all nodes (accumulated via operator.add)."""
     cached_goal_count: int
     """Number of goals served from cache (0 if --cache not used)."""
+    depth: str
+    """Report depth: 'brief' (executive summary) or 'standard' (full report)."""

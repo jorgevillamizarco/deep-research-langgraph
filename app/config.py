@@ -23,7 +23,7 @@ class ResearchConfig:
     """
 
     worker_model: str = os.getenv("WORKER_MODEL", "deepseek-v4-flash")
-    critic_model: str = os.getenv("CRITIC_MODEL", "deepseek-v4-flash")
+    critic_model: str = os.getenv("CRITIC_MODEL", "deepseek-v4-pro")  # stronger default for quality evaluation
     max_search_iterations: int = int(os.getenv("MAX_SEARCH_ITERATIONS", "5"))
     worker_api_key: str = os.getenv("WORKER_API_KEY", os.getenv("OPENAI_API_KEY", ""))
     worker_api_base: str = os.getenv("WORKER_API_BASE", os.getenv("OPENAI_API_BASE", ""))

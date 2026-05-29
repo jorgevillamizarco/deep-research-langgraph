@@ -20,7 +20,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from app.config import config
 from app.state import ResearchState
 from app.tools.citations import extract_citations_from_content
-from app.tools.search import format_search_results, get_search_tool
+from app.tools.search import format_search_results, get_search_tool, fetch_url_content
 
 logger = logging.getLogger(__name__)
 
@@ -70,13 +70,27 @@ Return ONLY a JSON array of strings, one query per item. Example:
 
     # Step 2: Execute all searches
     search_results = []
+    all_urls: list[str] = []
     for query in queries:
         try:
             results = search_tool.invoke({"query": query, "max_results": 5})
             search_results.append(format_search_results(query, results))
+            for r in results[:2]:  # collect top 2 URLs per query for deep fetch
+                url = r.get("url", "")
+                if url and url not in all_urls:
+                    all_urls.append(url)
         except Exception as e:
             logger.warning("Search failed for query %r: %s", query, e)
             search_results.append(f"### Search Results: {query}\nSearch failed: {e}\n")
+
+    # Step 2b: Fetch full content from top URLs (browser-level research)
+    fetched_content = []
+    for url in all_urls[:3]:  # max 3 pages to avoid timeouts
+        content = fetch_url_content(url, max_chars=5000)
+        if content:
+            fetched_content.append(f"## Source: {url}\n\n{content}\n")
+    if fetched_content:
+        search_results.append("\n\n### Full-Page Content\n" + "\n".join(fetched_content))
 
     # Step 3: Synthesize findings
     combined_searches = "\n\n".join(search_results)

@@ -144,6 +144,11 @@ NOT FOR: simple fact lookups (use search tool), real-time data (stock prices, we
                         "description": "Max critique-refinement loops (default: 2, range: 1-5). Lower for faster results.",
                         "default": 2,
                     },
+                    "depth": {
+                        "type": "string",
+                        "description": "Report depth: 'brief' (2-3 paragraph summary, 30-60s) or 'standard' (full report, 2-5 min). Default: standard.",
+                        "default": "standard",
+                    },
                 },
                 "required": ["topic"],
             },
@@ -241,20 +246,15 @@ async def _handle_search(
     return [types.TextContent(type="text", text="\n".join(lines))]
 
 
-def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
+def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: str = "standard"):
     """Run the full research pipeline in background thread, updating _research_tasks.
 
     Runs in a thread because graph.invoke() is synchronous and would block
-    the asyncio event loop. Uses asyncio.run_coroutine_threadsafe for the
-    lock-protected task store access.
+    the asyncio event loop.
     """
     import time
-    import threading
     from app.agent import build_research_graph
     from app.nodes.planner import generate_plan_only
-
-    # Get the event loop for thread-safe task store access
-    loop = asyncio.new_event_loop()
 
     task = _research_tasks.get(task_id)
     if task:
@@ -275,6 +275,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
             "final_cited_report": None, "final_report_with_citations": None,
             "messages": [], "errors": [], "evaluation_scores": [],
             "total_tokens": 0, "cached_goal_count": 0,
+            "depth": depth,
         }
         thread_id = f"research-{int(time.time())}"
         thread_config = {"configurable": {"thread_id": thread_id}}
@@ -291,7 +292,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
         if task:
             task["progress"] = 0.2
 
-        # Run graph (sync — this is why we run in a thread)
+        # Run graph (sync -- this is why we run in a thread)
         final_values = graph.invoke(initial_state, thread_config)
         report = (
             final_values.get("final_report_with_citations")
@@ -340,8 +341,6 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int):
         if task:
             task["status"] = "failed"
             task["error"] = str(e)
-    finally:
-        loop.close()
 
 
 async def _handle_deep_research(
@@ -352,6 +351,7 @@ async def _handle_deep_research(
 
     topic = (arguments or {}).get("topic", "")
     max_iterations = (arguments or {}).get("max_iterations", 2)
+    depth = (arguments or {}).get("depth", "standard")
 
     if not topic:
         return [types.TextContent(type="text", text="Error: 'topic' is required.")]
@@ -367,6 +367,7 @@ async def _handle_deep_research(
             "progress": 0.0,
             "created_at": now,
             "max_iterations": max_iterations,
+            "depth": depth,
         }
 
     # Cleanup stale tasks (>1 hour old)
@@ -377,7 +378,7 @@ async def _handle_deep_research(
             del _research_tasks[tid]
 
     # Launch background task in thread (sync graph.invoke blocks asyncio event loop)
-    asyncio.create_task(asyncio.to_thread(_deep_research_runner, task_id, topic, max_iterations))
+    asyncio.create_task(asyncio.to_thread(_deep_research_runner, task_id, topic, max_iterations, depth))
 
     return [types.TextContent(
         type="text",
@@ -386,7 +387,7 @@ async def _handle_deep_research(
 **Task ID:** {task_id}
 **Topic:** {topic}
 **Max iterations:** {max_iterations}
-**Status:** queued → running in background
+**Status:** queued -> running in background
 
 Poll with research_status("{task_id}") every 10-15 seconds until status is "completed".
 Research typically completes in 1-5 minutes.
@@ -570,6 +571,7 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                                 "properties": {
                                     "topic": {"type": "string", "description": "The research topic"},
                                     "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 2)", "default": 2},
+                                    "depth": {"type": "string", "description": "Report depth: brief or standard", "default": "standard"},
                                 },
                                 "required": ["topic"],
                             },

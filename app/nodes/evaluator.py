@@ -41,8 +41,20 @@ def _extract_scores(comment: str, iteration: int) -> dict | None:
 
 
 def _get_llm() -> Any:
-    """Get the chat model for evaluation."""
+    """Get the chat model for evaluation.
+
+    Warns if critic model matches worker model — same-model evaluation
+    produces inflated scores (LLMs grading their own output).
+    """
     from app.tokens import get_llm
+
+    if config.critic_model == config.worker_model:
+        logger.warning(
+            "CRITIC_MODEL (%s) matches WORKER_MODEL — evaluation quality degraded. "
+            "Set CRITIC_MODEL to a stronger model (deepseek-v4-pro, claude-sonnet-4, gpt-4o).",
+            config.critic_model,
+        )
+
     return get_llm(model=config.critic_model, temperature=0.1,
                    api_key=config.critic_api_key or config.worker_api_key or None,
                    base_url=config.critic_api_base or config.worker_api_base or None)

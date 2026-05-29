@@ -62,6 +62,39 @@ def composer_node(state: ResearchState) -> dict:
             "final_report_with_citations": "No research findings were generated.",
         }
 
+    depth = state.get("depth", "standard")
+
+    if depth == "brief":
+        # Brief mode: executive summary only, no full report generation
+        brief_prompt = f"""You are a research summarizer. Produce a 2-3 paragraph executive summary.
+
+Research Topic: {topic}
+
+Findings:
+{findings[:15000]}
+
+Write a concise executive summary (2-3 paragraphs, ~300-500 words). Include:
+- The key finding or answer
+- 2-3 supporting data points with citations as [Title](URL)
+- Overall confidence assessment (high/moderate/low)
+- One caveat or limitation
+
+Be direct. No section headers, no methodology, no source quality assessment.
+Just the summary."""
+        llm = _get_llm()
+        response = llm.invoke([
+            SystemMessage(content="You write concise research summaries."),
+            HumanMessage(content=brief_prompt),
+        ])
+        summary = response.content.strip()
+        return {
+            "final_cited_report": summary,
+            "final_report_with_citations": summary,
+            **llm.token_delta(),
+        }
+
+    # Standard mode: full structured report
+
     llm = _get_llm()
     sources_json = _serialize_sources(sources)
 

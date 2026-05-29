@@ -212,3 +212,55 @@ def format_search_results(query: str, results: list[dict]) -> str:
         if snippet:
             lines.append(f"   > {snippet[:300]}")
     return "\n".join(lines)
+
+
+# ──────────────────────────────────────────────
+# URL Content Fetching
+# ──────────────────────────────────────────────
+
+
+def fetch_url_content(url: str, max_chars: int = 8000) -> str:
+    """Fetch and extract readable text content from a URL.
+
+    Downloads the page, strips HTML tags/scripts/styles, and returns
+    clean text suitable for LLM consumption. Truncates to max_chars.
+
+    Returns empty string on failure (network error, timeout, etc.).
+    """
+    import re as _re
+
+    try:
+        import httpx
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(url, headers={
+                "User-Agent": "DeepResearch-MCP/1.0 (research agent; text extraction only)",
+                "Accept": "text/html,application/xhtml+xml,*/*",
+            })
+            resp.raise_for_status()
+            html = resp.text
+    except Exception as e:
+        logger.warning("URL fetch failed for %s: %s", url[:80], e)
+        return ""
+
+    if not html:
+        return ""
+
+    # Strip scripts, styles, and non-content tags
+    for tag in ["script", "style", "head", "nav", "footer", "header"]:
+        html = _re.sub(f"<{tag}[^>]*>.*?</{tag}>", "", html, flags=_re.DOTALL | _re.IGNORECASE)
+
+    # Strip HTML tags
+    html = _re.sub(r"<[^>]+>", "\n", html)
+
+    # Decode HTML entities
+    html = html.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+    html = html.replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " ")
+
+    # Clean whitespace: collapse blank lines
+    lines = [line.strip() for line in html.splitlines() if line.strip()]
+    text = "\n".join(lines)
+
+    if len(text) > max_chars:
+        text = text[:max_chars] + "\n\n[... content truncated ...]"
+
+    return text
