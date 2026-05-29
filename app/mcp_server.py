@@ -47,6 +47,10 @@ _research_tasks: dict[str, dict[str, Any]] = {}
 _research_lock = asyncio.Lock()
 _TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between sessions
 
+# ── SSE streaming: task_id → asyncio.Queue of progress events
+_stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
+_stream_lock = asyncio.Lock()
+
 
 def _get_report_dir() -> Path:
     """Return the first writable report directory from the fallback chain.
@@ -149,6 +153,10 @@ IMPORTANT: This tool returns immediately with a task_id. Use research_status(tas
 to check progress and retrieve the final report. Research runs in background
 and typically completes in 1-5 minutes. Polling every 10-15 seconds is
 recommended until status is "completed" or "failed".
+
+STREAMING: For real-time progress, connect to SSE endpoint after receiving task_id:
+  GET /stream/{task_id}
+Events: started, update (progress/stage), completed, failed, heartbeat.
 
 TOPIC GUIDANCE:
 - Be specific and contextual: "Compare LangGraph vs CrewAI for production multi-agent systems in 2026" works better than "AI agent frameworks"
@@ -271,6 +279,15 @@ async def _handle_search(
     return [types.TextContent(type="text", text="\n".join(lines))]
 
 
+def _push_stream_event(task_id: str, event: dict[str, Any]) -> None:
+    """Push a progress event to the SSE stream queue for a task (thread-safe)."""
+    loop = asyncio.get_event_loop()
+    if task_id in _stream_queues:
+        # Use call_soon_threadsafe to push from background thread
+        q = _stream_queues[task_id]
+        loop.call_soon_threadsafe(q.put_nowait, event)
+
+
 def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: str = "standard"):
     """Run the full research pipeline in background thread, updating _research_tasks.
 
@@ -280,6 +297,13 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
     import time
     from app.agent import build_research_graph
     from app.nodes.planner import generate_plan_only
+
+    def _update(task_id: str, **kwargs):
+        """Update task dict and push stream event."""
+        task = _research_tasks.get(task_id)
+        if task:
+            task.update(kwargs)
+        _push_stream_event(task_id, {"event": "update", "task_id": task_id, **kwargs})
 
     task = _research_tasks.get(task_id)
     if task:
@@ -314,8 +338,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         if plan_result.get("total_tokens"):
             initial_state["total_tokens"] = plan_result["total_tokens"]
 
-        if task:
-            task["progress"] = 0.2
+        _update(task_id, status="running", progress=0.2, stage="planning")
 
         # Run graph with streaming for progress tracking
         node_progress = {
@@ -331,8 +354,8 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         report = ""
         for event in graph.stream(initial_state, thread_config):
             for node_name in event:
-                if node_name in node_progress and task:
-                    task["progress"] = node_progress[node_name]
+                if node_name in node_progress:
+                    _update(task_id, progress=node_progress[node_name], stage=node_name)
 
                 # Extract report when composer finishes
                 if isinstance(event.get(node_name), dict):
@@ -344,9 +367,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
 
         if not report:
             err_text = "No report was generated. Check logs for details."
-            if task:
-                task["status"] = "failed"
-                task["error"] = err_text
+            _update(task_id, status="failed", error=err_text, progress=1.0, stage="error")
             return
 
         # Save report
@@ -358,31 +379,29 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         with open(filename, "w") as f:
             f.write(report)
 
-        # Generate PDF
-        pdf_path = None
-        try:
-            from app.cli import _convert_to_pdf
-            pdf_path = _convert_to_pdf(filename)
-        except Exception:
-            pass
+        _update(task_id, progress=0.95, stage="saving")
 
         if task:
             task["status"] = "completed"
             task["progress"] = 1.0
             task["report"] = report
             task["report_path"] = str(filename)
-            task["pdf_path"] = str(pdf_path) if pdf_path else None
             task["char_count"] = len(report)
             task["completed_at"] = time.time()
-
-            # Persist to disk so task survives restart/TTL cleanup
             _persist_task(task)
+
+        _push_stream_event(task_id, {
+            "event": "completed",
+            "task_id": task_id,
+            "status": "completed",
+            "progress": 1.0,
+            "report_path": str(filename),
+            "char_count": len(report),
+        })
 
     except Exception as e:
         logger.exception("Background research failed for task %s", task_id)
-        if task:
-            task["status"] = "failed"
-            task["error"] = str(e)
+        _update(task_id, status="failed", error=str(e), progress=1.0, stage="error")
 
 
 async def _handle_deep_research(
@@ -675,11 +694,94 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                 "error": {"code": -32601, "message": f"Method not found: {method}"},
             })
 
+    async def handle_stream(request):
+        """SSE endpoint for streaming real-time research progress.
+
+        Connect to /stream/{task_id} after calling deep_research to receive
+        live progress events. Events include:
+
+        - event: started — research has begun
+        - event: update — progress/stage changed (e.g. "parallel_researcher", "composer")
+        - event: completed — research done, report_path included
+        - event: failed — error occurred
+        - event: heartbeat — sent every 5s to keep connection alive
+
+        Returns 404 if task_id not found.
+        """
+        task_id = request.path_params.get("task_id", "")
+        if not task_id:
+            return JSONResponse({"error": "task_id required"}, status_code=400)
+
+        # Check task exists
+        task = _research_tasks.get(task_id)
+        if not task:
+            task = await asyncio.to_thread(_load_persisted_task, task_id)
+        if not task:
+            return JSONResponse({"error": "Task not found"}, status_code=404)
+
+        # Create a queue for this stream
+        q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        async with _stream_lock:
+            _stream_queues[task_id] = q
+
+        # Capture task snapshot for the generator
+        _task_snapshot = dict(task)  # type: ignore[arg-type]
+
+        async def event_generator():
+            import json as _json
+            # Send initial state
+            yield f"event: started\ndata: {_json.dumps({'task_id': task_id, 'topic': _task_snapshot.get('topic', ''), 'status': _task_snapshot.get('status', 'running'), 'progress': _task_snapshot.get('progress', 0)})}\n\n".encode("utf-8")
+
+            last_progress = _task_snapshot.get("progress", 0)
+            completed = False
+
+            while not completed:
+                try:
+                    # Wait for next event with timeout
+                    event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    yield f"event: {event.get('event', 'update')}\ndata: {_json.dumps(event)}\n\n".encode("utf-8")
+
+                    if event.get("event") in ("completed", "failed"):
+                        completed = True
+                        break
+                except asyncio.TimeoutError:
+                    # Heartbeat to keep connection alive
+                    # Check if task was completed in another way
+                    current_task = _research_tasks.get(task_id)
+                    if current_task:
+                        current_progress = current_task.get("progress", last_progress)
+                        if current_progress != last_progress:
+                            last_progress = current_progress
+                            yield f"event: heartbeat\ndata: {_json.dumps({'task_id': task_id, 'progress': current_progress, 'status': current_task.get('status', 'running')})}\n\n".encode("utf-8")
+                        if current_task.get("status") in ("completed", "failed"):
+                            yield f"event: {current_task['status']}\ndata: {_json.dumps({'task_id': task_id, 'status': current_task['status'], 'progress': 1.0})}\n\n".encode("utf-8")
+                            completed = True
+                    else:
+                        # Task gone — send completion and close
+                        yield f"event: completed\ndata: {_json.dumps({'task_id': task_id, 'status': 'completed', 'progress': 1.0})}\n\n".encode("utf-8")
+                        completed = True
+
+            # Cleanup queue
+            async with _stream_lock:
+                _stream_queues.pop(task_id, None)
+
+        from starlette.responses import StreamingResponse
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
+
     app = Starlette(
         routes=[
             Route("/health", endpoint=health_check),
             Route("/mcp", endpoint=handle_sse, methods=["GET"]),
             Route("/mcp", endpoint=mcp_probe, methods=["POST", "OPTIONS"]),
+            Route("/stream/{task_id}", endpoint=handle_stream, methods=["GET"]),
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )
