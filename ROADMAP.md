@@ -84,15 +84,13 @@ Also added `ENABLE_EVALUATOR` env var to disable evaluation entirely (auto-PASS)
 
 ### 8. No Browser-Based Research
 
-🟡 **OPEN.** The agent fetches URL content (top 3 results, 5K chars each) and appends the full-page text to findings. This works for text-heavy pages but fails on:
-- JavaScript-rendered content (SPAs, dashboards)
-- Paywalled articles (Medium, WSJ)
-- Interactive visualizations
-- Cloudflare-protected pages
-
-A headless browser node (Playwright/Puppeteer) would unlock research topics that are currently invisible. This is the single highest-leverage improvement for research depth.
-
-**Effort:** Medium (2-3 days). **Impact:** High.
+✅ **RESOLVED** (May 2026). Added Playwright + Chromium browser extraction:
+- `fetch_url_content()` uses two-stage extraction: HTTP first, browser fallback
+- Automatic fallback when HTTP returns <500 chars (JS-rendered pages)
+- Graceful degradation if Playwright not installed (ImportError catch)
+- Removes script/nav/footer elements before text extraction
+- 20s timeout per page, networkidle wait strategy
+- Docker image includes Playwright + Chromium (~200MB larger)
 
 ### 9. Single LLM Provider Dependency
 
