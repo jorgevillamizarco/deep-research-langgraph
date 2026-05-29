@@ -119,7 +119,7 @@ def parallel_researcher_node(state: ResearchState) -> dict:
     llm = _get_llm()
 
     finding = _research_single_goal(goal, search_tool, llm)
-    text = finding.to_text()
+    text = finding.to_markdown()
 
     logger.info(
         "Parallel researcher done: goal=%s... result=%d chars",

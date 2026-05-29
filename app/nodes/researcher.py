@@ -129,14 +129,13 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
             short_id=sid,
             url=src.get("url", ""),
             title=src.get("title", ""),
-            domain=src.get("domain", ""),
             tier=src.get("tier", 3),
         )
         for sid, src in _dummy_sources.items()
     ]
 
     return ResearchFinding(
-        goal=goal,
+        goal_text=goal,
         summary=summary,
         citations=citations,
         search_queries=queries,
@@ -214,7 +213,7 @@ def researcher_node(state: ResearchState) -> dict:
     for i, goal in enumerate(goals["research"]):
         logger.info("Researching goal %d/%d: %s...", i + 1, len(goals["research"]), goal[:60])
         finding = _research_single_goal(goal, search_tool, llm)
-        research_summaries.append(finding.to_text())
+        research_summaries.append(finding.to_markdown())
 
     combined_research = "\n\n---\n\n".join(research_summaries)
 
