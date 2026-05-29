@@ -38,48 +38,44 @@ Architectural concerns from code review (May 2026). Not blockers — the agent i
 
 ### 1. Test Coverage vs Complexity
 
-12 unit tests for ~3,500 lines. Most mock the LLM and test isolated functions. **No end-to-end integration test** runs a full graph with mocked responses through all nodes. The parallel citation bug existed because nothing tested the merge→composer path.
-
-**Mitigation:** Add integration test that mocks all LLM calls and verifies the full pipeline: plan → parallel research → merge → refinement loop → composer. Mock search tool with canned results.
+✅ **RESOLVED** (May 2026). Added E2E integration test (`tests/test_integration.py`) that mocks LLM and search tool, runs full graph pipeline, and verifies parallel research → merge → refinement → composer path. 16 total tests (15 unit + 1 E2E).
 
 ### 2. "Strings Everywhere" Architecture
 
-✅ **PARTIALLY RESOLVED** (May 2026). Added `app/models.py` with `ResearchFinding`, `Citation`, `DeliverableResult`, and `SourceQualityMetrics` Pydantic models. `_research_single_goal()` now returns a typed `ResearchFinding` with pre-extracted citations, preventing the parallel citation loss bug at the type level.
+✅ **PARTIALLY RESOLVED** (May 2026). Added `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable`, `ConfidenceTag`, and `ResearchOutput` Pydantic models. `_research_single_goal()` now returns a typed `ResearchFinding` with pre-extracted citations, preventing the parallel citation loss bug at the type level.
 
-**Remaining:** `parallel_findings` state field is still `list[str]` for LangGraph compatibility. Full migration to typed models between nodes requires a larger refactor of the state schema.
+**Remaining:** `parallel_findings` state field is still `list[str]` for LangGraph TypedDict compatibility. Full migration to typed models between all nodes requires a larger refactor of the state schema.
 
 ### 3. Evaluator Reliability
 
-LLM-based evaluation is inherently unreliable. Even v4-pro grading v4-flash, it's still an LLM grading text. The numeric rubric mostly catches obvious failures (no citations, no structure) and passes everything else.
+✅ **MITIGATED** (May 2026). Added rule-based pre-check before LLM evaluation:
+- CLEAR FAIL: 0 URLs, <200 chars, error keywords → skip LLM, return FAIL
+- CLEAR PASS: 3+ URLs, quantitative data, structure, >400 chars → skip LLM, return PASS
+- AMBIGUOUS: falls through to LLM evaluation (conservative)
 
-**Mitigation:**
-- Make evaluation optional (skip when `CRITIC_MODEL` unset)
-- Add human-in-the-loop override for critical research
-- Consider rule-based pre-filter: has citations? has structure? has data? — only run LLM eval when ambiguous
+Also added `ENABLE_EVALUATOR` env var to disable evaluation entirely (auto-PASS).
 
 ### 4. Cache Complexity Exceeds Value
 
-❌ **DEPRECATED** (May 2026). Cross-run cache was 300+ lines with TTL, delta checks, date detection, fuzzy matching. Hit rate was low due to LLM non-determinism (planner generates different goal wordings each run). All cache functions are now no-ops with deprecation warnings. Will be removed in a future release. The `--cache` CLI flag has been removed.
+✅ **DEPRECATED** (May 2026). Cross-run cache was 300+ lines with TTL, delta checks, date detection, fuzzy matching. Hit rate was low due to LLM non-determinism. All cache functions are now no-ops with deprecation warnings. Will be removed in a future release. The `--cache` CLI flag has been removed.
 
 **Lesson:** Cross-run caching has diminishing returns for single-agent research tools. Fresh research with fast models is cheap enough.
 
 ### 5. Composer Prompt Bloat
 
-Composer serializes the entire `sources` dict (up to 40+ entries) as JSON into the prompt. With verbose source metadata, this approaches token limits.
-
-**Mitigation:** Pass only sources actually cited by Pass 1, or pre-summarize sources to title + URL + tier.
+✅ **RESOLVED** (May 2026). `_serialize_sources()` now only passes essential fields (`short_id`, `title`, `url`, `tier`) to the composer prompt, dropping `authority_reason` and `supported_claims` which the LLM doesn't need for citation writing.
 
 ### 6. No Streaming to MCP Clients
 
-MCP server runs in background thread, clients poll every 10-15s. Zero progress feedback during the 3-5 minute run.
-
-**Ideal:** SSE streaming of partial results to MCP clients. Hard because the current architecture uses sync `graph.invoke()` in a thread. Would need async graph streaming with checkpoint-compatible state updates.
+✅ **RESOLVED** (May 2026). Added SSE streaming endpoint `GET /stream/{task_id}`:
+- Events: started, update (progress/stage), completed, failed, heartbeat
+- Thread-safe: runner pushes via `call_soon_threadsafe`
+- Heartbeats every 5s to keep connection alive
+- Queue auto-creates per task, cleaned up on completion
 
 ### 7. PDF Dependency is Heavy
 
-Pandoc + weasyprint pulls in ~100MB system deps. Most users just want markdown.
-
-**Mitigation:** Make PDF opt-in (`--pdf` flag) instead of automatic. Default: markdown only.
+✅ **RESOLVED** (May 2026). PDF generation is now opt-in (`--pdf` flag). Default is markdown only. Saves ~100MB of system deps (pandoc/weasyprint) for most users.
 
 ## Next — Polish
 
