@@ -227,39 +227,6 @@ def test_merge_findings_extracts_citations():
         assert arxiv_src["tier"] == 1
 
 
-def test_cache_delta_check_list_results():
-    """_delta_check correctly handles list[dict] search results."""
-    from app.cache import _delta_check
-    import unittest.mock
-
-    cached_sources = {
-        "src-1": {"url": "https://example.com/page"},
-    }
-
-    # Fresh: 1 new domain out of 2 -> True
-    results_fresh = [
-        {"url": "https://new-domain.com/article", "title": "New"},
-        {"url": "https://example.com/page", "title": "Old"},
-    ]
-    with unittest.mock.patch("app.tools.search.get_search_tool") as mock_get:
-        mock_tool = unittest.mock.MagicMock()
-        mock_tool.invoke.return_value = results_fresh
-        mock_get.return_value = mock_tool
-        assert _delta_check("topic", "goal", cached_sources) is True
-
-    # Stale: 2 new domains -> False
-    results_stale = [
-        {"url": "https://new1.com/a", "title": "N1"},
-        {"url": "https://new2.com/b", "title": "N2"},
-        {"url": "https://example.com/page", "title": "Old"},
-    ]
-    with unittest.mock.patch("app.tools.search.get_search_tool") as mock_get:
-        mock_tool = unittest.mock.MagicMock()
-        mock_tool.invoke.return_value = results_stale
-        mock_get.return_value = mock_tool
-        assert _delta_check("topic", "goal", cached_sources) is False
-
-
 def test_planner_skips_when_approved():
     """planner_node returns empty dict when plan is already approved."""
     from app.nodes.planner import planner_node

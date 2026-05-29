@@ -61,9 +61,9 @@ LLM-based evaluation is inherently unreliable. Even v4-pro grading v4-flash, it'
 
 ### 4. Cache Complexity Exceeds Value
 
-Cross-run cache: 300+ lines with TTL, delta checks, date detection, fuzzy matching. Hit rate is low due to LLM non-determinism (planner generates different goal wordings each run).
+❌ **DEPRECATED** (May 2026). Cross-run cache was 300+ lines with TTL, delta checks, date detection, fuzzy matching. Hit rate was low due to LLM non-determinism (planner generates different goal wordings each run). All cache functions are now no-ops with deprecation warnings. Will be removed in a future release. The `--cache` CLI flag has been removed.
 
-**Verdict:** Keep as opt-in (`--cache`) but don't invest further. Semantic chunking + vector retrieval would be over-engineering. Consider deprecating if maintenance burden grows.
+**Lesson:** Cross-run caching has diminishing returns for single-agent research tools. Fresh research with fast models is cheap enough.
 
 ### 5. Composer Prompt Bloat
 
@@ -101,11 +101,11 @@ Progress markers show milestones but user can't watch the report form.
 
 ### Cross-run memory
 
-✅ Implemented. Goal-level cache with key phrase hashing, fuzzy matching, delta validation, opt-in only.
+❌ **DEPRECATED** (May 2026). Goal-level cache with key phrase hashing, fuzzy matching, delta validation. Hit rate was fundamentally limited by LLM non-determinism. All functions are now no-ops with deprecation warnings. Cache file (`research_cache.db`) will be removed in a future release.
 
-**Lesson:** Cross-run caching has diminishing returns for single-agent research tools. Hit rate is fundamentally limited by LLM non-determinism — the planner generates different goal wordings each run. Semantic chunking + vector retrieval would add significant complexity for marginal benefit. Keep as lightweight opt-in bonus, not a core feature.
+**Lesson:** Cross-run caching has diminishing returns for single-agent research tools. The planner generates different goal wordings each run, so exact and even fuzzy matching rarely hits. Semantic chunking + vector retrieval would add significant complexity for marginal benefit. Fresh research with fast models (v4-flash) is cheap enough that caching is not worth the code complexity.
 
-**Design:**
+**Original design (for reference):**
 - `--cache` flag required (never enabled by default)
 - Cache key: SHA256 of normalized goal text
 - TTL by source tier: 2 weeks (T1), 1 week (T2), 2 days (T3)

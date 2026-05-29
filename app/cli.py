@@ -119,19 +119,17 @@ th{{background:#f5f5f5}}</style></head><body>
     return None
 
 
-def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False, generate_pdf: bool = False) -> str:
+def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = False) -> str:
     """Execute full deep research workflow from the command line.
 
     Flow:
       1. Generate plan (direct LLM, no graph)
-      2. Optional: check cross-run cache for reusable goal findings
-      3. Run graph with approved plan + pre-loaded cached findings
-      4. Save and return the final report (markdown + optional PDF)
+      2. Run graph with approved plan
+      3. Save and return the final report (markdown + optional PDF)
 
     Args:
         topic: The research topic.
         auto_approve: If True, skip the plan review and execute immediately.
-        use_cache: If True, check goal-level cache for reusable findings.
         generate_pdf: If True, also generate PDF output (requires pandoc + weasyprint).
 
     Returns:
@@ -216,33 +214,6 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
         initial_state["plan_approved"] = True
         initial_state["total_tokens"] = total_tokens_val
 
-        # ── Cross-run cache (--cache flag) ──
-        cached_count = 0
-        fresh_goals = []
-        if use_cache:
-            print(f"  💾 Cache mode: checking {len(parallel_goals)} goals...", flush=True)
-            from app.cache import get_cached_goal, cache_goal, compute_avg_tier
-            cached_findings_list = []
-            cached_sources = {}
-            for goal in parallel_goals:
-                cached = get_cached_goal(goal, topic)
-                if cached:
-                    cached_findings_list.append(f"### Research: {goal}\n\n{cached['findings']}")
-                    cached_sources.update(cached.get("sources", {}))
-                    cached_count += 1
-                    print(f"  💾 Cache hit: {goal[:60]}...", flush=True)
-                else:
-                    fresh_goals.append(goal)
-            if cached_count:
-                initial_state["parallel_goals"] = fresh_goals
-                initial_state["parallel_findings"] = cached_findings_list
-                initial_state["sources"] = {**initial_state["sources"], **cached_sources}
-                initial_state["cached_goal_count"] = cached_count
-                remaining = len(fresh_goals)
-                print(f"  💾 {cached_count} cached, {remaining} fresh goals", flush=True)
-        else:
-            fresh_goals = parallel_goals
-
         final_values = graph.invoke(initial_state, thread_config)
         final_state = final_values
         report = (
@@ -250,17 +221,6 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
             or final_values.get("final_cited_report")
             or ""
         )
-
-        # ── Cache fresh findings for future runs ──
-        if use_cache and fresh_goals:
-            from app.cache import cache_goal, compute_avg_tier
-            findings_text = final_state.get("section_research_findings", "")
-            final_sources = final_state.get("sources", {})
-            avg_tier = compute_avg_tier(final_sources)
-            # Cache each fresh goal's contribution
-            for goal_text in fresh_goals:
-                cache_goal(goal_text, findings_text, final_sources, avg_tier)
-            print(f"  💾 Cached {len(fresh_goals)} fresh goals for future runs", flush=True)
 
         # ── Report result ──
         if not report:
@@ -330,9 +290,6 @@ def run_research(topic: str, auto_approve: bool = False, use_cache: bool = False
                     print(f"  Tokens:   {total_tokens_val:,}")
         except Exception:
             pass  # Token reporting is non-critical
-        cached_count_val = final_state.get("cached_goal_count", 0) if final_state else 0
-        if cached_count_val:
-            print(f"  Cache:    {cached_count_val} goals from cache")
         print()
         for line in report.split("\n")[:20]:
             print(f"  {line}")
@@ -373,11 +330,6 @@ def main() -> None:
         help="Auto-approve the research plan (skip interrupt)",
     )
     parser.add_argument(
-        "--cache",
-        action="store_true",
-        help="Use cross-run goal cache (aggressive TTL, delta-validated, opt-in)",
-    )
-    parser.add_argument(
         "--pdf",
         action="store_true",
         help="Also generate PDF output (requires pandoc + weasyprint)",
@@ -403,7 +355,7 @@ def main() -> None:
         print("\nError: Provide a research topic or --topic-file")
         sys.exit(1)
 
-    run_research(topic, auto_approve=args.auto, use_cache=args.cache, generate_pdf=args.pdf)
+    run_research(topic, auto_approve=args.auto, generate_pdf=args.pdf)
 
 
 if __name__ == "__main__":
