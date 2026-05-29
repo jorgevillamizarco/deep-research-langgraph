@@ -128,15 +128,78 @@ def planner_node(state: ResearchState) -> dict:
     }
 
 
+def enrich_topic(topic: str, llm: Any | None = None) -> str:
+    """Enrich a raw user topic into a structured research brief.
+
+    Adds domain signals, ambiguity detection, expected output formats,
+    and key dimensions — so the planner generates better goals and the
+    researcher knows what to look for.
+
+    Args:
+        topic: Raw user topic (e.g., "compare software assessment frameworks")
+        llm: Optional LLM instance (creates one if not provided)
+
+    Returns:
+        Enriched research brief with domain context, disambiguation notes,
+        and output expectations. Original topic is preserved as a prefix.
+    """
+    if llm is None:
+        llm = _get_llm()
+
+    system_prompt = """You are a research methodologist. Given a research topic, produce a structured brief
+that helps downstream agents plan better research. Identify domain context,
+potential ambiguities, and what a good answer looks like.
+
+Return ONLY the brief text. Do NOT include preamble or explanation."""
+
+    user_prompt = f"""Research topic: {topic}
+
+Produce a structured research brief covering:
+
+1. DOMAIN: What field/domain does this belong to? Be specific.
+2. AMBIGUITIES: Are there terms with multiple meanings across domains?
+   (e.g., "PRR" = manufacturing review vs software readiness review,
+   "pipeline" = CI/CD vs data processing vs sales)
+3. EXPECTED OUTPUT: What format should the final answer take?
+   (comparison matrix, ranked list, decision framework, narrative analysis)
+4. KEY DIMENSIONS: What specific attributes or axes should be compared/analyzed?
+5. SOURCE DIVERSITY: What types of sources are needed?
+   (official standards, academic papers, engineering blogs, vendor docs)
+
+Be concise but specific. The planner will use this to generate better research goals."""
+
+    response = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ])
+    enrichment = response.content.strip()
+
+    # Combine: original topic + enriched brief
+    brief = f"TOPIC: {topic}\n\nRESEARCH BRIEF:\n{enrichment}"
+    logger.info("Enriched topic (%d chars raw → %d chars brief)", len(topic), len(brief))
+    return brief
+
+
 def generate_plan_only(topic: str, previous_plan: str | None = None,
-                       user_feedback: str | None = None) -> dict:
+                       user_feedback: str | None = None,
+                       enriched: bool = True) -> dict:
     """Generate a research plan without graph/interrupt. For two-pass CLI flow.
 
     Returns dict with research_plan, report_sections, parallel_goals.
     No graph needed — direct LLM calls only.
+
+    Args:
+        enriched: If True, enrich the raw topic with domain context and
+                  disambiguation before generating the plan.
     """
     llm = _get_llm()
-    plan = _generate_plan(topic, previous_plan, user_feedback, llm=llm)
+
+    # Enrich the topic before planning (if not a refinement/feedback cycle)
+    research_topic = topic
+    if enriched and not previous_plan:
+        research_topic = enrich_topic(topic, llm=llm)
+
+    plan = _generate_plan(research_topic, previous_plan, user_feedback, llm=llm)
     sections = _generate_sections(plan, llm=llm)
 
     # Guarantee at least one DELIVERABLE goal
