@@ -254,7 +254,7 @@ flowchart TB
 | **Deliverable inside refinement loop** | Enhancer findings must flow through Phase 2 for full regeneration — not shallow append. |
 | **Dedicated SearXNG with `limiter: false`** | Shared Hermes SearXNG has rate limiting enabled. Research agent needs unlimited access. |
 | **MCP POST JSON-RPC handler** | Hermes probes MCP via POST, not just SSE. Full `initialize` / `tools/list` / `tools/call` dispatch. |
-| **Self-documenting MCP tools** | Both `search` and `deep_research` declare `outputSchema` describing the full report structure (sections, features, delivery metadata). LLMs can inspect the output format before calling. Follows MCP spec recommendation to include examples and detailed schema in tool descriptions. |
+| **MCP tool descriptions** | Rich self-documenting descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) with examples. `outputSchema` removed — Hermes MCP client enforces it on results and our tools return markdown text, not structured JSON. |
 | **Health check ≥30s** | Long research runs exceed default 5s Docker health check. Prevents flapping. |
 | **State pruning on report** | Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5) to prevent O(N²) checkpoint bloat. Finding: 200-turn agent → 5.3 GB checkpoints without pruning. |
 | **DELIVERABLE failsafe** | Planner prompt mandates 1-2 DELIVERABLE goals. Post-processing appends default if none generated. Deliverable node has string-match failsafe when regex misses the tag. Phase 2 guaranteed to execute. |
@@ -279,7 +279,6 @@ flowchart LR
         DF["DELIVERABLE Failsafe<br/>Phase 2 always executes"]
         FS["Flexible Structure<br/>planner sections as template"]
         MM["Multi-Model<br/>separate worker/critic models"]
-        SD["Self-Documenting<br/>outputSchema on MCP tools"]
     end
 ```
 

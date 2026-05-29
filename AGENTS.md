@@ -98,10 +98,6 @@ Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 
 Returns markdown-formatted search results with titles, URLs, and snippets.
 
-### `outputSchema`
-
-Both tools declare `outputSchema` so MCP clients (LLMs) know the exact report structure before calling: sections (executive_summary, source_quality_assessment, cross_cutting_themes, research_findings, methodology), features (per-claim confidence, source tiers, contradiction detection, quantitative data), and delivery metadata (markdown_path, pdf_path, char_count). Follows MCP spec best practices.
-
 ## Production Features
 
 | Feature | How |
@@ -117,7 +113,7 @@ Both tools declare `outputSchema` so MCP clients (LLMs) know the exact report st
 | **Token tracking** | `total_tokens` state field with `operator.add` reducer |
 | **Error surface** | Non-fatal errors + evaluation scores in Methodology section |
 | **Flexible structure** | Composer uses planner's section outline as primary template |
-| **Self-documenting tools** | MCP tools declare `outputSchema` so LLMs know report structure, sections, features, and delivery without calling |
+| **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results)
 
 ## Quality Pipeline
 
