@@ -25,7 +25,13 @@ import logging
 from typing import Optional
 
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.checkpoint.sqlite import SqliteSaver
+try:
+    from langgraph.checkpoint.sqlite import SqliteSaver
+except ImportError:
+    try:
+        from langgraph_checkpoint_sqlite import SqliteSaver
+    except ImportError:
+        SqliteSaver = None  # type: ignore[assignment]
 from langgraph.constants import END
 from langgraph.types import Send
 from langgraph.graph import StateGraph
