@@ -33,6 +33,9 @@ class ResearchConfig:
     critic_api_base: str = os.getenv("CRITIC_API_BASE", "")
     output_dir: str = os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research/agent-results"))
     enable_evaluator: bool = os.getenv("ENABLE_EVALUATOR", "true").lower() not in ("false", "0", "no", "")
+    fallback_api_key: str = os.getenv("FALLBACK_API_KEY", "")
+    fallback_api_base: str = os.getenv("FALLBACK_API_BASE", "")
+    fallback_model: str = os.getenv("FALLBACK_MODEL", "")
 
     def validate(self) -> list[str]:
         """Validate configuration and return list of issues.
