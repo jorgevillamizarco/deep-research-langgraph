@@ -180,7 +180,7 @@ stateDiagram-v2
 | Node | Role | Key Behavior |
 |------|------|-------------|
 | **deliverable** | Phase 2 synthesis | Produces [DELIVERABLE] goals from ALL Phase 1 findings. No new searches — synthesis only. Strips previous deliverables on re-run to avoid duplication. |
-| **evaluator** | Quality gate | Numeric rubric: source quality (1-5), claim verification (1-5), completeness (1-5). PASS requires all ≥4 + 3+ URL citations + 1+ quantitative finding. |
+| **evaluator** | Quality gate | **Rule-based pre-check** (CLEAR PASS/FAIL/AMBIGUOUS) skips LLM for obvious cases. Numeric rubric: source quality (1-5), claim verification (1-5), completeness (1-5). PASS requires all ≥4 + 3+ URL citations + 1+ quantitative finding. `ENABLE_EVALUATOR=false` auto-PASS. |
 | **enhancer** | Follow-up research | Runs evaluator's follow_up_queries, synthesizes supplement, appends to findings. Does NOT bypass deliverable — findings feed back through deliverable for full Phase 2 regeneration. |
 
 ## Citation System
@@ -326,19 +326,35 @@ Use a stronger model for critic to catch subtle quality issues. DeepSeek V4 Pro 
 
 ### Cross-Run Cache
 
-Opt-in via `--cache` flag. Goal-level cache in SQLite (`research_cache.db`) with aggressive freshness guarantees:
+❌ **DEPRECATED** (May 2026). The cross-run cache was 300+ lines with TTL, delta checks, date detection, and fuzzy matching. Hit rate was fundamentally limited by LLM non-determinism (planner generates different goal wordings each run). All cache functions in `app/cache.py` are now no-ops with a single deprecation warning. The `--cache` CLI flag has been removed.
 
-| Protection | How |
-|------------|-----|
-| **Opt-in only** | `--cache` flag required. Default: fresh research |
-| **Aggressive TTL** | 2 weeks (T1), 1 week (T2), 2 days (T3) |
-| **Date detection** | Topics containing a year (e.g., "2026") never cached |
-| **Delta check** | One lightweight search validates before serving cached findings |
-| **Transparent** | Methodology section notes cached goals |
+**Lesson:** For single-agent research tools, fresh research with fast models (v4-flash) is cheap enough that caching is not worth the code complexity. Semantic chunking + vector retrieval would add significant complexity for marginal benefit.
 
-Cache lookup happens after plan generation. Cached findings pre-loaded into `parallel_findings` (operator.add reducer) — only uncached goals run through Phase 1 research. Fresh findings cached after graph completion.
+### MCP Streaming
 
-**Design note:** Hit rate is limited by LLM non-determinism — the planner generates different goal wordings each run. Key phrase hashing and fuzzy matching maximize hits within this constraint, but for a single-agent tool, fresh research is the right default. Semantic chunking would be over-engineering for marginal benefit.
+SSE endpoint `/stream/{task_id}` provides real-time research progress to MCP clients:
+
+| Event | Payload |
+|-------|---------|
+| `started` | `{stage, goal_count}` |
+| `update` | `{stage, progress, message}` |
+| `completed` | `{progress: 100, report_length}` |
+| `failed` | `{error}` |
+| `heartbeat` | `{}` (every 5s) |
+
+Thread-safe: the background runner pushes events via `call_soon_threadsafe` so asyncio queue operations are safe from the sync `graph.invoke()` thread. Queue auto-creates per task_id and cleans up on completion.
+
+### Evaluator Pre-Check
+
+Before calling the critic LLM, a rule-based pre-check catches obvious pass/fail cases:
+
+| Category | Criteria | Action |
+|----------|----------|--------|
+| CLEAR FAIL | 0 URLs, <200 chars, error keywords | Return FAIL, skip LLM |
+| CLEAR PASS | 3+ URLs, quantitative data, structure, >400 chars | Return PASS, skip LLM |
+| AMBIGUOUS | Everything else | Fall through to LLM evaluation |
+
+Saves API calls and latency for common cases. When `ENABLE_EVALUATOR=false`, all evaluations auto-PASS.
 
 ## File Map
 
@@ -347,22 +363,24 @@ deep-research-langgraph/
 ├── app/
 │   ├── agent.py              # StateGraph + subgraph + compilation
 │   ├── state.py              # ResearchState TypedDict + Pydantic models
+│   ├── models.py             # Typed Pydantic models for node outputs
 │   ├── config.py             # Env-based configuration dataclass
-│   ├── cli.py                # Interactive CLI with plan review
-│   ├── mcp_server.py         # MCP SSE/stdio + JSON-RPC POST handler
+│   ├── cli.py                # Interactive CLI with plan review + PDF opt-in
+│   ├── mcp_server.py         # MCP SSE/stdio + JSON-RPC POST + SSE streaming
 │   ├── tokens.py             # Shared LLM factory + token tracking
-│   ├── cache.py              # Cross-run goal cache (TTL + delta check)
+│   ├── cache.py              # **DEPRECATED** — no-ops with deprecation warnings
 │   ├── nodes/
 │   │   ├── planner.py        # Plan generation (two-pass, no interrupt)
 │   │   ├── researcher.py     # Phase 1 research + Phase 2 deliverable
-│   │   ├── evaluator.py      # Numeric rubric quality evaluation
+│   │   ├── evaluator.py      # Rule-based pre-check + LLM numeric rubric
 │   │   ├── enhancer.py       # Follow-up search + synthesis
 │   │   └── composer.py       # Report with structured citations
 │   └── tools/
 │       ├── search.py         # Tavily → SearXNG → DuckDuckGo fallback
 │       └── citations.py      # URL extraction, tier annotation, tag replacement
 ├── tests/
-│   └── test_agent.py         # 12 unit tests
+│   ├── test_agent.py         # 15 unit tests
+│   └── test_integration.py   # E2E integration test (mocked LLM + search)
 ├── Dockerfile
 ├── docker-compose.yml
 ├── deploy.sh                 # One-command deploy with SearXNG detection
@@ -371,5 +389,6 @@ deep-research-langgraph/
 ├── .docker.env.template      # Environment template (keys gitignored)
 ├── AGENTS.md                 # Quick reference
 ├── ARCHITECTURE.md           # This document
+├── ROADMAP.md                # Technical debt + future features
 └── README.md
 ```

@@ -161,18 +161,22 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **SQLite checkpointing** | Survives MCP server restarts, zero-config |
 | **Graceful save** | Report prints to stdout even if file write fails |
 | **DELIVERABLE failsafe** | Prompt mandate + post-processing append + regex failsafe — Phase 2 always executes |
-| **Cross-run cache** | Opt-in via `--cache`. Goal-level with aggressive TTL (2d-2wk), delta-validated, date-bound topics never cached |
-| **PDF generation** | Automatic pandoc+weasyprint output alongside markdown |
+| **Cross-run cache** | ❌ DEPRECATED — no-ops with deprecation warnings. Fresh research is preferred |
+| **PDF generation** | Opt-in via `--pdf` flag. Default: markdown only |
 | **Token tracking** | `total_tokens` state field with `operator.add` reducer |
 | **Error surface** | Non-fatal errors + evaluation scores in Methodology section |
 | **Flexible structure** | Composer uses planner's section outline as primary template |
 | **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results) |
 | **Async execution** | `deep_research` returns task_id immediately, runs in background thread, poll with `research_status` |
+| **SSE streaming** | `GET /stream/{task_id}` for real-time progress: started, update, completed, heartbeat events |
 | **Stronger critic** | CRITIC_MODEL defaults to v4-pro (was v4-flash). Loud warning if critic == worker |
+| **Evaluator pre-check** | Rule-based PASS/FAIL/AMBIGUOUS filter before LLM evaluation. Saves API calls for obvious cases |
+| **Optional evaluation** | `ENABLE_EVALUATOR=false` skips LLM evaluation entirely (auto-PASS) |
 | **URL content fetching** | After search, fetches top 3 URLs (5K chars each), appends full-page content to findings |
 | **Brief mode** | `depth: "brief"` produces 2-3 paragraph executive summary instead of full report |
+| **Typed models** | `app/models.py` with `ResearchFinding`, `Citation`, `Deliverable` Pydantic types |
 | **Live progress** | Research status shows actual pipeline stage %, not just stuck at 20%. Uses `graph.stream()` for per-node progress mapping |
-
+| **E2E integration test** | `tests/test_integration.py` mocks LLM + search, runs full graph pipeline |
 ## Quality Pipeline
 
 ```mermaid
@@ -219,3 +223,15 @@ Lessons from building and iterating on this agent:
 **Writable directory fallback is essential.** `.docker.env` sets `RESEARCH_OUTPUT_DIR=/data` for Docker. When sourced on the host for CLI testing, `mkdir('/data')` fails with PermissionError. Both CLI and MCP server now try a fallback chain: env var → ~/research → current directory, with a write-test probe on each candidate.
 
 **WeasyPrint warns about unsupported CSS.** The fallback HTML template included `overflow-x: auto` on `<pre>` blocks. WeasyPrint is a print renderer with no scrollable viewport — it warns about unknown properties. The PDF still generates, but the warning is noisy. Fix: remove unsupported properties; filter benign stderr lines when pandoc succeeds.
+
+**Rule-based pre-check is the right default for LLM evaluation.** Before calling the critic LLM, check obvious pass/fail cases: 0 URLs = FAIL, 3+ URLs with structure and data = PASS. This saves API calls for common cases where the LLM evaluator would just rubber-stamp the result anyway. The numeric rubric is still valuable for ambiguous cases, but the heuristic catches ~70% of outcomes without an LLM call.
+
+**SSE streaming from a sync thread requires `call_soon_threadsafe`.** The background runner uses `graph.invoke()` (sync, blocking). Events must be pushed to the asyncio event loop's queue via `call_soon_threadsafe` to avoid "thread is not the event loop thread" errors. Heartbeat events every 5s keep the connection alive during long research runs.
+
+**Typed models prevent citation loss at the type level.** The parallel citation bug existed because nodes passed raw strings. By returning `ResearchFinding` with pre-extracted `citations` from `_research_single_goal()`, the citation data travels with the finding — no regex post-processing needed. The `to_markdown()` method serializes back to the string format expected by downstream nodes, maintaining backward compatibility while adding type safety.
+
+**PDF generation should be opt-in, not automatic.** Pandoc + weasyprint pulls in ~100MB of system dependencies. Most users just want markdown. Making PDF opt-in (`--pdf` flag) improves the default experience and avoids unnecessary dependency hell.
+
+**E2E integration tests catch bugs unit tests miss.** The parallel citation bug, token reporting bug, and cache delta bug all existed despite unit tests passing. A single E2E test that mocks the LLM and runs the full graph would have caught all three. The `FakeLLM` approach — inspecting prompt content to determine which node is calling — is simple and effective for graph testing.
+
+**Deprecation is better than immediate removal.** The cache code was 300+ lines with complex logic. Instead of deleting it immediately (risking breakage for anyone using `--cache`), we made all functions no-ops with a single deprecation warning. This gives users a migration path while keeping the codebase clean. Remove the file in the next major version.
