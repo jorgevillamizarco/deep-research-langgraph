@@ -245,7 +245,7 @@ def fetch_url_content(url: str, max_chars: int = 8000) -> str:
         logger.info("HTTP extraction failed for %s, "
                      "trying browser fallback", url[:80])
 
-    browser_text = _fetch_via_browser(url, max_chars)
+    browser_text = _fetch_via_browser(url, max_chars, follow_links=2)  # follow 2 relevant links
     if browser_text:
         return browser_text[:max_chars]
 
@@ -290,8 +290,14 @@ def _fetch_via_http(url: str, max_chars: int = 8000) -> str:
     return text
 
 
-def _fetch_via_browser(url: str, max_chars: int = 8000) -> str:
+def _fetch_via_browser(url: str, max_chars: int = 8000, follow_links: int = 0) -> str:
     """Extract text from URL via headless Playwright Chromium.
+
+    Args:
+        url: The URL to fetch.
+        max_chars: Maximum characters per page.
+        follow_links: If >0, also follow this many relevant links on the page
+                     and include their content. Adds ~20s per followed link.
 
     Falls back gracefully if Playwright is not installed.
     """
@@ -303,7 +309,6 @@ def _fetch_via_browser(url: str, max_chars: int = 8000) -> str:
 
     try:
         with sync_playwright() as p:
-            # Use system Chromium if installed (apt), fall back to Playwright's bundled
             launch_args: dict = {"headless": True}
             import shutil
             chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
@@ -311,24 +316,110 @@ def _fetch_via_browser(url: str, max_chars: int = 8000) -> str:
                 launch_args["executable_path"] = chromium_path
             browser = p.chromium.launch(**launch_args)
             page = browser.new_page()
+
             # Navigate and wait for network to be mostly idle
             page.goto(url, wait_until="networkidle", timeout=20000)
-            # Wait a beat for lazy-loaded content
             page.wait_for_timeout(1000)
+
             # Extract visible text from the page body
-            text = page.evaluate("""
-                () => {
-                    // Remove script, style, nav, footer elements
-                    for (const el of document.querySelectorAll(
-                        'script, style, nav, footer, header, [role="navigation"]'
-                    )) el.remove();
-                    return document.body ? document.body.innerText : "";
-                }
-            """)
+            text = _extract_page_text(page)
+
+            # Multi-page: follow relevant links
+            if follow_links > 0:
+                linked_texts = _follow_links(page, browser, url, follow_links, max_chars)
+                if linked_texts:
+                    text += "\n\n## Linked Pages\n\n" + "\n\n".join(linked_texts)
+
             browser.close()
-            # Clean up whitespace
+
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             return "\n".join(lines)
     except Exception as e:
         logger.warning("Browser extraction failed for %s: %s", url[:80], e)
         return ""
+
+
+def _extract_page_text(page) -> str:
+    """Extract clean text from a Playwright page."""
+    return page.evaluate("""
+        () => {
+            for (const el of document.querySelectorAll(
+                'script, style, nav, footer, header, [role="navigation"]'
+            )) el.remove();
+            return document.body ? document.body.innerText : "";
+        }
+    """)
+
+
+def _follow_links(page, browser, base_url: str, max_links: int, max_chars: int) -> list[str]:
+    """Follow relevant links on the page and extract their content.
+
+    Filters links to same-domain, content-like URLs, skipping nav/auxiliary pages.
+    """
+    import re
+    from urllib.parse import urljoin, urlparse
+
+    base_domain = urlparse(base_url).netloc
+
+    # Extract links from the page
+    links_data = page.evaluate("""
+        () => {
+            const links = [];
+            for (const a of document.querySelectorAll('a[href]')) {
+                const href = a.href;
+                const text = (a.textContent || '').trim();
+                // Skip empty, nav, very short links
+                if (!href || !text || text.length < 10) continue;
+                // Skip nav/auxiliary content
+                const parent = a.closest('nav, footer, header, aside, .sidebar, .nav, .menu');
+                if (parent) continue;
+                links.push({href, text: text.substring(0, 200)});
+            }
+            return links;
+        }
+    """)
+
+    # Filter to same-domain content links
+    visited: set[str] = {base_url}
+    selected: list[str] = []
+    for link in links_data:
+        href = link.get("href", "")
+        if not href or href in visited:
+            continue
+        parsed = urlparse(href)
+        # Same domain, http/https only, not fragments
+        if parsed.netloc != base_domain:
+            continue
+        if not parsed.scheme.startswith("http"):
+            continue
+        # Skip non-content paths
+        path_lower = parsed.path.lower()
+        skip_patterns = ["/tag/", "/category/", "/author/", "/login", "/signup",
+                         "/search", "/cdn-cgi", "/wp-admin", "/feed", "/rss",
+                         ".pdf", ".zip", ".png", ".jpg", ".gif", ".svg"]
+        if any(p in path_lower for p in skip_patterns):
+            continue
+        visited.add(href)
+        selected.append(href)
+        if len(selected) >= max_links:
+            break
+
+    # Follow each link and extract content
+    results: list[str] = []
+    for link_url in selected:
+        try:
+            new_page = browser.new_page()
+            new_page.goto(link_url, wait_until="networkidle", timeout=15000)
+            new_page.wait_for_timeout(500)
+            text = _extract_page_text(new_page)
+            new_page.close()
+            if text and len(text) > 200:
+                clean = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+                # Truncate per-page
+                if len(clean) > max_chars:
+                    clean = clean[:max_chars] + "\n\n[... content truncated ...]"
+                results.append(f"### {link_url}\n\n{clean}")
+        except Exception as e:
+            logger.debug("Failed to follow link %s: %s", link_url[:80], e)
+
+    return results

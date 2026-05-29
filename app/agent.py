@@ -133,7 +133,8 @@ def parallel_researcher_node(state: ResearchState) -> dict:
         len(text),
     )
     print(f"  ✓ [{goal[:60]}...] ({len(text):,} chars)", flush=True)
-    return {"parallel_findings": [text]}
+    # Return typed finding — citations travel with the object, no regex needed
+    return {"parallel_findings": [finding]}
 
 
 # ──────────────────────────────────────────────
@@ -144,24 +145,43 @@ def parallel_researcher_node(state: ResearchState) -> dict:
 def merge_findings_node(state: ResearchState) -> dict:
     """Merge all parallel research findings into a single research output.
 
-    Also extracts citations from the combined findings so that sources
-    discovered during parallel Phase 1 are available for the composer.
+    Uses typed accessors to avoid regex citation extraction — citations are
+    carried in ResearchFinding models from _research_single_goal().
     """
-    from app.tools.citations import extract_citations_from_content
+    from app.models import ResearchFinding
 
-    findings = state.get("parallel_findings", [])
-    combined = "\n\n---\n\n".join(findings) if findings else ""
-    logger.info("Merged %d parallel findings (%d chars)", len(findings), len(combined))
-    print(f"  📦 Phase 1 complete — {len(findings)} goals, {len(combined):,} chars", flush=True)
+    raw_findings = state.get("parallel_findings", [])
+    findings_text = "\n\n---\n\n".join(
+        f.to_markdown() if isinstance(f, ResearchFinding) else str(f)
+        for f in raw_findings
+    ) if raw_findings else ""
 
-    # Extract citations from ALL Phase 1 findings (parallel + sequential)
-    existing_count = len(state.get("url_to_short_id", {}))
-    new_sources, new_url_map = extract_citations_from_content(combined, existing_count)
+    logger.info("Merged %d parallel findings (%d chars)", len(raw_findings), len(findings_text))
+    print(f"  📦 Phase 1 complete — {len(raw_findings)} goals, {len(findings_text):,} chars", flush=True)
+
+    # Extract citations from typed ResearchFinding objects (no regex)
+    all_sources: dict = {}
+    all_url_map: dict = {}
+    for i, finding in enumerate(raw_findings):
+        if isinstance(finding, ResearchFinding):
+            for j, c in enumerate(finding.citations):
+                sid = c.short_id or f"src-{len(all_sources) + 1}"
+                all_sources[sid] = {
+                    "short_id": sid, "url": c.url, "title": c.title or "",
+                    "tier": c.tier,
+                }
+                all_url_map[c.url] = sid
+
+    # Fallback: regex extraction for string findings (backward compat)
+    if not all_sources and findings_text:
+        from app.tools.citations import extract_citations_from_content
+        existing_count = len(state.get("url_to_short_id", {}))
+        all_sources, all_url_map = extract_citations_from_content(findings_text, existing_count)
 
     return {
-        "section_research_findings": combined,
-        "sources": new_sources,
-        "url_to_short_id": new_url_map,
+        "section_research_findings": findings_text,
+        "sources": all_sources,
+        "url_to_short_id": all_url_map,
     }
 
 
