@@ -303,7 +303,13 @@ def _fetch_via_browser(url: str, max_chars: int = 8000) -> str:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # Use system Chromium if installed (apt), fall back to Playwright's bundled
+            launch_args: dict = {"headless": True}
+            import shutil
+            chromium_path = shutil.which("chromium") or shutil.which("chromium-browser")
+            if chromium_path:
+                launch_args["executable_path"] = chromium_path
+            browser = p.chromium.launch(**launch_args)
             page = browser.new_page()
             # Navigate and wait for network to be mostly idle
             page.goto(url, wait_until="networkidle", timeout=20000)

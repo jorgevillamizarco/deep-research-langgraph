@@ -45,10 +45,15 @@ RUN pip install --no-cache-dir \
     uvicorn>=0.48.0 \
     && rm -rf /root/.cache
 
-# Browser-based research support (Playwright + Chromium)
-RUN pip install --no-cache-dir playwright \
-    && playwright install --with-deps chromium \
-    && rm -rf /root/.cache
+# Browser-based research support (Playwright + Chromium via apt)
+# playwright install chromium downloads ~290MB and often fails during Docker build.
+# Using system Chromium with PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH instead.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    libnss3 libnspr4 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+    libgbm1 libasound2t64 \
+    && pip install --no-cache-dir playwright \
+    && rm -rf /var/lib/apt/lists/*
 
 # PDF generation support
 RUN apt-get update && apt-get install -y --no-install-recommends \

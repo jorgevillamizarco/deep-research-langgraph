@@ -446,3 +446,105 @@ def test_config_validation_critic_same_as_worker():
     cfg.critic_model = "deepseek-v4-flash"
     issues = cfg.validate()
     assert any("same as WORKER_MODEL" in i or "Same-model" in i for i in issues)
+
+
+# ── Type-safe accessor tests ──
+
+
+def test_findings_from_state_empty():
+    """findings_from_state returns empty list for empty state."""
+    from app.models import findings_from_state
+    result = findings_from_state({})
+    assert result == []
+
+
+def test_findings_from_state_with_findings():
+    """findings_from_state parses section_research_findings into typed models."""
+    from app.models import findings_from_state, ResearchFinding
+    state = {
+        "section_research_findings": (
+            "### Research: Test goal\n\nSome findings with [Source](https://example.com/a).\n\n"
+            "---\n\n"
+            "### Research: Goal two\n\nMore data at [Link](https://example.com/b).\n"
+        ),
+        "sources": {
+            "src-1": {"url": "https://example.com/a", "title": "Source A", "tier": 2},
+        },
+    }
+    result = findings_from_state(state)
+    assert len(result) >= 1
+    assert isinstance(result[0], ResearchFinding)
+    assert any("Test goal" in r.goal_text for r in result)
+
+
+def test_findings_to_state_serializes():
+    """findings_to_state produces state-compatible dict."""
+    from app.models import findings_to_state, ResearchFinding, Citation
+    findings = [
+        ResearchFinding(
+            goal_text="Test",
+            summary="Content with [Link](https://example.com/x)",
+            citations=[Citation(short_id="src-1", url="https://example.com/x", title="X", tier=2)],
+        ),
+    ]
+    result = findings_to_state(findings)
+    assert "section_research_findings" in result
+    assert "sources" in result
+    assert "url_to_short_id" in result
+    assert len(result["sources"]) == 1
+
+
+def test_get_typed_sources():
+    """get_typed_sources converts state sources dict to Citation objects."""
+    from app.models import get_typed_sources, Citation
+    state = {
+        "sources": {
+            "src-1": {"url": "https://example.com", "title": "Test", "tier": 1},
+        },
+    }
+    result = get_typed_sources(state)
+    assert "src-1" in result
+    assert isinstance(result["src-1"], Citation)
+    assert result["src-1"].tier == 1
+
+
+# ── Serialize sources tests ──
+
+
+def test_serialize_sources_strips_heavy_fields():
+    """_serialize_sources only passes essential fields to LLM prompt."""
+    from app.nodes.composer import _serialize_sources
+    sources = {
+        "src-1": {
+            "short_id": "src-1",
+            "title": "Test Source",
+            "url": "https://example.com",
+            "tier": 2,
+            "authority_reason": "Well-known engineering blog with good reputation",
+            "supported_claims": ["Claim A", "Claim B", "Claim C"],
+        },
+    }
+    result = _serialize_sources(sources)
+    import json
+    parsed = json.loads(result)
+    src = parsed["src-1"]
+    assert "short_id" in src
+    assert "url" in src
+    assert "title" in src
+    assert "tier" in src
+    assert "authority_reason" not in src, "Should drop authority_reason"
+    assert "supported_claims" not in src, "Should drop supported_claims"
+
+
+# ── Browser extraction test ──
+
+
+def test_browser_extraction_graceful_degradation():
+    """_fetch_via_browser returns empty string when Playwright not installed."""
+    import unittest.mock
+    with unittest.mock.patch("app.tools.search.logger"):
+        from app.tools.search import _fetch_via_browser
+        # Playwright not installed in test venv — should return ""
+        result = _fetch_via_browser("https://example.com", max_chars=500)
+        assert isinstance(result, str)
+        assert result == ""  # graceful degradation
