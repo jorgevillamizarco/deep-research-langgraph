@@ -19,6 +19,7 @@
 - [x] Planner double-entry fixed (two-pass: generate plan separately, graph runs once)
 - [x] MCP server (SSE + JSON-RPC POST handler — tools/call executes directly, no stub redirect)
 - [x] MCP POST transport fixes (send_progress_notification degrades silently, AnyUrl → str serialization)
+- [x] Async execution (deep_research returns task_id immediately, background thread, research_status polling)
 - [x] Docker deployment (agent + SearXNG, one-command deploy)
 - [x] Comprehensive docs (ARCHITECTURE.md, AGENTS.md, skills)
 - [ ] Self-documenting MCP tools (~~outputSchema~~ — reverted: Hermes enforces it on results, tools return markdown text not JSON)

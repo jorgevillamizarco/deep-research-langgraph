@@ -76,16 +76,26 @@ hermes mcp add research --url http://localhost:8100/mcp
 
 ## MCP Tools
 
-### `deep_research` — Full research pipeline
+### `deep_research` — Full research pipeline (async)
 
 ```json
 {
   "topic": "string (required)",
-  "max_iterations": "integer (optional, default 3)"
+  "max_iterations": "integer (optional, default 2)"
 }
 ```
 
-Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
+Returns a `task_id` immediately. Pipeline runs in background. Poll with `research_status`.
+
+### `research_status` — Poll running research
+
+```json
+{
+  "task_id": "string (required)"
+}
+```
+
+Returns status ("running"/"completed"/"failed"), progress %, and full report when done.
 
 ### `search` — Quick web search
 
@@ -96,9 +106,31 @@ Returns markdown report + PDF with citations, saved to `RESEARCH_OUTPUT_DIR`.
 }
 ```
 
-Returns markdown-formatted search results with titles, URLs, and snippets.
+Returns markdown-formatted search results.
 
-Both tools work over SSE and POST JSON-RPC (Hermes transport). The POST handler executes tools directly — no stub redirect.
+### Usage Pattern
+
+```
+1. deep_research("topic") → task_id (instant)
+2. research_status(task_id) every 10-15s → "running" / "completed"
+3. Read report from completed status response
+```
+
+All tools work over SSE and POST JSON-RPC. The POST handler executes tools directly. Pipeline runs in background thread to avoid blocking the event loop.
+
+### For Other Agents
+
+Any MCP-compatible agent can use this server. Connect to `http://localhost:8100/mcp`:
+
+```bash
+# Hermes
+hermes mcp add research --url http://localhost:8100/mcp
+
+# Claude Code / Cursor
+# Add to mcp_servers config pointing to http://localhost:8100/mcp
+```
+
+The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 
 ## Production Features
 
@@ -115,7 +147,8 @@ Both tools work over SSE and POST JSON-RPC (Hermes transport). The POST handler 
 | **Token tracking** | `total_tokens` state field with `operator.add` reducer |
 | **Error surface** | Non-fatal errors + evaluation scores in Methodology section |
 | **Flexible structure** | Composer uses planner's section outline as primary template |
-| **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results)
+| **Self-documenting tools** | Rich tool descriptions (HOW IT WORKS, OUTPUT FORMAT, TOPIC GUIDANCE) — no outputSchema (Hermes enforces it on results) |
+| **Async execution** | `deep_research` returns task_id immediately, runs in background thread, poll with `research_status` |
 
 ## Quality Pipeline
 
