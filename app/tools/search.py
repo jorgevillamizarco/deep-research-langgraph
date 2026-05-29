@@ -222,11 +222,39 @@ def format_search_results(query: str, results: list[dict]) -> str:
 def fetch_url_content(url: str, max_chars: int = 8000) -> str:
     """Fetch and extract readable text content from a URL.
 
-    Downloads the page, strips HTML tags/scripts/styles, and returns
+    Downloads the page via HTTP, strips HTML tags, and returns
     clean text suitable for LLM consumption. Truncates to max_chars.
+
+    If HTTP extraction yields too little content (<500 chars), falls back
+    to headless browser (Playwright + Chromium) for JavaScript-rendered pages.
 
     Returns empty string on failure (network error, timeout, etc.).
     """
+    import re as _re
+
+    # First attempt: HTTP extraction (fast, works for most static pages)
+    text = _fetch_via_http(url, max_chars)
+    if text and len(text) >= 500:
+        return text[:max_chars]
+
+    # Second attempt: headless browser (JS-rendered pages, SPAs)
+    if text and len(text) < 500:
+        logger.info("HTTP extraction returned only %d chars from %s, "
+                     "trying browser fallback", len(text), url[:80])
+    else:
+        logger.info("HTTP extraction failed for %s, "
+                     "trying browser fallback", url[:80])
+
+    browser_text = _fetch_via_browser(url, max_chars)
+    if browser_text:
+        return browser_text[:max_chars]
+
+    # Return whatever HTTP got, even if sparse
+    return text[:max_chars]
+
+
+def _fetch_via_http(url: str, max_chars: int = 8000) -> str:
+    """Extract text from URL via HTTP request + HTML stripping."""
     import re as _re
 
     try:
@@ -259,8 +287,42 @@ def fetch_url_content(url: str, max_chars: int = 8000) -> str:
     # Clean whitespace: collapse blank lines
     lines = [line.strip() for line in html.splitlines() if line.strip()]
     text = "\n".join(lines)
-
-    if len(text) > max_chars:
-        text = text[:max_chars] + "\n\n[... content truncated ...]"
-
     return text
+
+
+def _fetch_via_browser(url: str, max_chars: int = 8000) -> str:
+    """Extract text from URL via headless Playwright Chromium.
+
+    Falls back gracefully if Playwright is not installed.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.debug("Playwright not installed — browser extraction unavailable")
+        return ""
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            # Navigate and wait for network to be mostly idle
+            page.goto(url, wait_until="networkidle", timeout=20000)
+            # Wait a beat for lazy-loaded content
+            page.wait_for_timeout(1000)
+            # Extract visible text from the page body
+            text = page.evaluate("""
+                () => {
+                    // Remove script, style, nav, footer elements
+                    for (const el of document.querySelectorAll(
+                        'script, style, nav, footer, header, [role="navigation"]'
+                    )) el.remove();
+                    return document.body ? document.body.innerText : "";
+                }
+            """)
+            browser.close()
+            # Clean up whitespace
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            return "\n".join(lines)
+    except Exception as e:
+        logger.warning("Browser extraction failed for %s: %s", url[:80], e)
+        return ""

@@ -264,6 +264,18 @@ def test_planner_skips_when_approved():
 def test_planner_generates_plan_when_not_approved():
     """planner_node generates plan when not approved."""
     from app.nodes.planner import planner_node
+    import unittest.mock
+
+    # Mock LLM to return a pre-canned plan (avoid real API call)
+    mock_llm = unittest.mock.MagicMock()
+    mock_response = unittest.mock.MagicMock()
+    mock_response.content = (
+        "[RESEARCH] Investigate LangGraph checkpointing\n"
+        "[RESEARCH] Research state pruning techniques\n"
+        "[DELIVERABLE] Synthesize findings into guide\n"
+    )
+    mock_llm.invoke.return_value = mock_response
+    mock_llm.token_delta.return_value = {"total_tokens": 100}
 
     state: ResearchState = {
         "topic": "test topic",
@@ -291,14 +303,10 @@ def test_planner_generates_plan_when_not_approved():
         "parallel_findings": [],
     }
 
-    # This will call the LLM — we can't easily mock without more setup.
-    # Just verify it doesn't crash and returns expected keys.
-    # Skip in CI by checking for API key.
     import os
-    if not os.getenv("WORKER_API_KEY"):
-        return
 
-    result = planner_node(state)
+    with unittest.mock.patch("app.nodes.planner._get_llm", return_value=mock_llm):
+        result = planner_node(state)
     assert "research_plan" in result
     assert "parallel_goals" in result
     assert "[DELIVERABLE]" in result["research_plan"]

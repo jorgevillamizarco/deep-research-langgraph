@@ -34,23 +34,26 @@ class _TrackedChatOpenAI:
 
     def invoke(self, messages: list) -> Any:
         """Invoke LLM with fallback on network/auth errors."""
-        response = self._try_invoke(messages, self._llm)
-        if response is not None:
-            return response
-        if self._fallback_llm:
+        try:
+            return self._try_invoke(messages, self._llm)
+        except Exception as primary_err:
+            if not self._fallback_llm:
+                raise  # No fallback — let original error propagate
             logger = __import__("logging").getLogger(__name__)
             logger.warning(
                 "Primary LLM failed, retrying with fallback provider "
                 "(node: %s)", self._node_name or "unknown"
             )
             self._used_fallback = True
-            response = self._try_invoke(messages, self._fallback_llm)
-            if response is not None:
+            try:
+                response = self._try_invoke(messages, self._fallback_llm)
                 return response
-        raise RuntimeError(f"LLM call failed in node '{self._node_name}' — "
-                           "no working provider (primary failed, no fallback configured). "
-                           "Set FALLBACK_API_KEY/FALLBACK_API_BASE/FALLBACK_MODEL "
-                           "or configure a local Ollama instance.")
+            except Exception:
+                raise RuntimeError(
+                    f"LLM call failed in node '{self._node_name}': "
+                    "primary and fallback providers both failed. "
+                    "Check your API keys and network connectivity."
+                ) from primary_err
 
     def _try_invoke(self, messages: list, llm: ChatOpenAI) -> Any:
         """Try invoke() on a specific LLM. Returns None on failure."""

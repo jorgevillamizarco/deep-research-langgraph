@@ -45,6 +45,11 @@ RUN pip install --no-cache-dir \
     uvicorn>=0.48.0 \
     && rm -rf /root/.cache
 
+# Browser-based research support (Playwright + Chromium)
+RUN pip install --no-cache-dir playwright \
+    && playwright install --with-deps chromium \
+    && rm -rf /root/.cache
+
 # PDF generation support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pandoc \
