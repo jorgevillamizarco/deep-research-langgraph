@@ -410,7 +410,7 @@ Poll again in 10-15 seconds."""
 
 ---
 
-{report[:8000]}"""
+{report}"""
         )]
 
     elif status == "failed":
