@@ -292,16 +292,35 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         if task:
             task["progress"] = 0.2
 
-        # Run graph (sync -- this is why we run in a thread)
-        final_values = graph.invoke(initial_state, thread_config)
-        report = (
-            final_values.get("final_report_with_citations")
-            or final_values.get("final_cited_report") or ""
-        )
+        # Run graph with streaming for progress tracking
+        node_progress = {
+            "__start__": 0.2,
+            "planner": 0.2,
+            "parallel_researcher": 0.3,
+            "merge_findings": 0.45,
+            "deliverable": 0.55,
+            "research_evaluator_node": 0.65,
+            "enhancer": 0.72,
+            "composer": 0.85,
+            "final_report_with_citations": 0.95,
+        }
+
+        report = ""
+        for event in graph.stream(initial_state, thread_config):
+            for node_name in event:
+                if node_name in node_progress and task:
+                    task["progress"] = node_progress[node_name]
+
+                # Extract report when composer finishes
+                if isinstance(event.get(node_name), dict):
+                    node_data = event[node_name]
+                    if isinstance(node_data, dict):
+                        rpt = node_data.get("final_report_with_citations") or node_data.get("final_cited_report") or ""
+                        if rpt:
+                            report = rpt
 
         if not report:
-            errors = final_values.get("errors", [])
-            err_text = "\n".join(errors) if errors else "Unknown error"
+            err_text = "No report was generated. Check logs for details."
             if task:
                 task["status"] = "failed"
                 task["error"] = err_text
