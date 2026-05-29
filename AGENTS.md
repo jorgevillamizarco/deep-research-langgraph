@@ -6,7 +6,11 @@ After every feature/fix: run tests → verify live endpoint → **rebuild + depl
 
 Never skip the Docker deploy step. Venv-only testing misses container-specific issues (missing packages, import path differences, env var behavior). The SqliteSaver import worked in venv but failed in the container — this class of bug is invisible without Docker verification.
 
-Important learnings (MCP patterns, LangGraph patterns, deployment patterns) must be retrofitted into Hermes skills so knowledge doesn't stay siloed in this repo.
+## Assessment
+
+Use **Production Readiness Review (PRR)** — not letter grades. Every item is a concrete, checkable pass/fail with evidence. See ROADMAP.md for the full PRR checklist.
+
+**Verdict:** Production-usable for single-user deployment. 10 remaining gaps are operational (alerting, runbook, rate limiting, scaling, deep health) — not architectural. The research pipeline is solid.
 
 ## Architecture
 
