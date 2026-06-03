@@ -28,6 +28,7 @@ Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_
 
 **CLI:** `python -m app.cli --auto "topic"` (auto-approve plan)
 **MCP:** `python -m app.mcp_server --transport sse --port 8100`
+**Dashboard:** `http://localhost:8100/` (web GUI — launch + monitor + read reports)
 **Docker:** `docker compose up -d` (includes SearXNG)
 
 ## Key Files
@@ -120,7 +121,7 @@ Returns a `task_id` immediately. Pipeline runs in background. Poll with `researc
 }
 ```
 
-Returns status ("running"/"completed"/"failed"), progress %, and full report when done.
+Returns status ("running"/"completed"/"failed"), progress %, human-readable stage (e.g. "Searching the web (Phase 1)"), and full report when done.
 
 ### `search` — Quick web search
 
@@ -162,6 +163,10 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | Feature | How |
 |---------|-----|
 | **Progress markers** | Real-time CLI: ✓ per-goal, 📦 Phase 1, 📝 Phase 2, ✅/❌ eval, 🔧 enhancer, 📄 report |
+| **Stage labels in MCP** | `research_status` returns human-readable stage (e.g. "Searching the web (Phase 1)") alongside percentage |
+| **Web dashboard** | `http://localhost:8100/` — real-time task list with progress bars, stage labels, inline report viewer modal. Auto-refreshes every 5s. |
+| **Launch from GUI** | Dashboard form: topic input + depth selector + Enter-to-submit. Backed by MCP JSON-RPC — zero new backend. |
+| **Concurrent execution** | Multiple deep research tasks run in parallel via `asyncio.to_thread`. Unique thread IDs, isolated checkpoints, non-colliding report filenames. Dashboard shows all tasks with independent progress. |
 | **State pruning** | Composer caps lists (messages:20, errors:50, scores:5) — prevents O(N²) checkpoint bloat |
 | **Circuit breaker** | Score stagnation across 2 iterations → force pass, saves API costs |
 | **SQLite checkpointing** | Survives MCP server restarts, zero-config |
@@ -249,3 +254,7 @@ Lessons from building and iterating on this agent:
 **E2E integration tests catch bugs unit tests miss.** The parallel citation bug, token reporting bug, and cache delta bug all existed despite unit tests passing. A single E2E test that mocks the LLM and runs the full graph would have caught all three. The `FakeLLM` approach — inspecting prompt content to determine which node is calling — is simple and effective for graph testing.
 
 **Deprecation is better than immediate removal.** The cache code was 300+ lines with complex logic. Instead of deleting it immediately (risking breakage for anyone using `--cache`), we made all functions no-ops with a single deprecation warning. This gives users a migration path while keeping the codebase clean. Remove the file in the next major version.
+
+**Concurrent execution exposed three hidden bugs.** Two research tasks running simultaneously surfaced: (1) `os.environ["MAX_SEARCH_ITERATIONS"]` was a global race — fixed by removing it (nodes read from state, not env). (2) `thread_id` used `int(time.time())` (second granularity) — two tasks in the same second shared a checkpoint namespace. Fixed by using the UUID `task_id`. (3) Report filenames collided on same-second timestamp — fixed by appending `task_id[-12:]` suffix. All three bugs were invisible under single-task testing.
+
+**Stage labels turn blind polling into informed waiting.** `research_status` returning "Refining with deeper research (Phase 2) (65%)" tells the calling agent where it is in the pipeline. The stage data was already available internally from `graph.stream()` — it just wasn't surfaced to MCP clients. A 15-line change with zero performance impact.

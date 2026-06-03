@@ -9,6 +9,7 @@ flowchart TB
     subgraph Entry["Entry Points"]
         CLI["CLI<br/>python -m app.cli"]
         MCP["MCP Server<br/>SSE + JSON-RPC"]
+        Dashboard["Web Dashboard<br/>/:8100 GUI"]
         Docker["Docker<br/>docker compose up"]
     end
 
@@ -48,6 +49,7 @@ flowchart TB
 
     CLI --> Graph
     MCP --> Graph
+    Dashboard --> MCP
     Docker --> Graph
     Graph --> Search
     Graph --> Output
@@ -265,6 +267,9 @@ flowchart TB
 | **Verification pass** | After Phase 1 synthesis, detects domain-specific keywords (manufacturing, defense, etc.) and runs cross-check search with disambiguators (\"software engineering\"). Appends Verification Note if alternative context found. Only triggers when concerning terms detected — zero cost otherwise. |
 | **Writable directory fallback** | CLI and MCP server try RESEARCH_OUTPUT_DIR → ~/research → cwd with write-test probe. Prevents PermissionError when .docker.env (with /data) is sourced on host. |
 | **LLM timeout/retry** | `ChatOpenAI` configured with `timeout=60` and `max_retries=2` to handle transient API failures gracefully. |
+| **Web dashboard** | Served at `/` — single self-contained HTML page. Zero new dependencies (Starlette already handles HTTP). Auto-refreshes via 5s polling of `/tasks` JSON API. Inline report viewer uses modal overlay (no popup blockers). Launch form POSTs to existing MCP `tools/call` endpoint — no new backend code. |
+| **Stage labels** | `research_status` now returns human-readable pipeline stage (e.g. "Searching the web (Phase 1)") alongside numeric progress. Stage data already available internally from `graph.stream()` per-node mapping — just wasn't surfaced to MCP clients. Added `STAGE_LABELS` dict mapping internal node names to user-facing descriptions. |
+| **Concurrent execution** | Multiple `deep_research` calls spawn separate OS threads via `asyncio.to_thread`. Each task gets a unique `task_id` (used as LangGraph `thread_id` for checkpoint isolation) and unique report filename (`task_id[-12:]` suffix). SQLite connection uses `check_same_thread=False` (WAL mode). Three concurrency bugs found and fixed: global `os.environ` race, `int(time.time())` thread_id collision, same-second report filename collision. |
 
 ## Production Features
 

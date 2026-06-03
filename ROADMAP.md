@@ -35,7 +35,8 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Well-understood resource profile (single container, ~2GB RAM)
 - [x] State pruning prevents O(N²) checkpoint bloat
 - [x] Search fallback chain (Tavily → SearXNG → DuckDuckGo)
-- [ ] Horizontal scaling — one container = one concurrent research
+- [x] Concurrent execution — multiple research tasks run in parallel via `asyncio.to_thread` (June 2026). Unique thread IDs, isolated checkpoints, non-colliding filenames. Dashboard shows all tasks independently.
+- [ ] Horizontal scaling — single container handles concurrent threads but no cross-container load distribution
 - [ ] Request queuing — background thread with no pending request management
 
 ### 5. Operability — Can someone else run it?
@@ -49,7 +50,7 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [ ] Checkpoint DB migration story — no schema versioning
 - [ ] Deep health check — `/health` returns 200 even if LLM is unreachable
 
-**Verdict:** Production-usable for single-user deployment. Not production-grade for multi-tenant or mission-critical use. The 5 remaining gaps are all operational concerns, not architectural — the agent's core research pipeline is solid.
+**Verdict:** Production-usable for single-user deployment. Supports concurrent research tasks within a single container. Not production-grade for multi-tenant or mission-critical use. The remaining 9 operational gaps are alerting, runbook, rate limiting, horizontal scaling, request queuing, deep health, input sanitization, checkpoint migration, and versioned releases — none architectural.
 
 **Research quality improvements (May 2026):**
 - Topic enrichment: raw user topics are pre-processed into structured research briefs with domain context and ambiguity detection
@@ -90,6 +91,10 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] LLM timeout/retry (timeout=60s, max_retries=2)
 - [x] WeasyPrint CSS warning suppression
 - [x] Self-documenting MCP tools (rich descriptions with HOW IT WORKS/OUTPUT FORMAT/TOPIC GUIDANCE; outputSchema removed — Hermes enforces it on results)
+- [x] Stage labels in research_status (human-readable pipeline stage alongside numeric progress)
+- [x] Web dashboard (`http://localhost:8100/`) — task list, progress bars, inline report viewer, launch form
+- [x] Concurrent execution (multiple research tasks run in parallel via asyncio.to_thread + isolated checkpoints)
+- [x] Concurrent bugs fixed (os.environ race, thread_id collision, report filename collision)
 
 ## Technical Debt & Known Issues
 
