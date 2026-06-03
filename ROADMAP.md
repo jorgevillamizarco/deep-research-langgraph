@@ -95,6 +95,7 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Web dashboard (`http://localhost:8100/`) — task list, progress bars, inline report viewer, launch form
 - [x] Concurrent execution (multiple research tasks run in parallel via asyncio.to_thread + isolated checkpoints)
 - [x] Concurrent bugs fixed (os.environ race, thread_id collision, report filename collision)
+- [x] PDF generation (opt-in via MCP `pdf: true` or dashboard checkbox, pandoc + weasyprint, `/download` route)
 
 ## Technical Debt & Known Issues
 

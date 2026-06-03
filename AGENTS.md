@@ -105,7 +105,8 @@ hermes mcp add research --url http://localhost:8100/mcp
 {
   "topic": "string (required)",
   "max_iterations": "integer (optional, default 2)",
-  "depth": "string (optional, 'brief' or 'standard')"
+  "depth": "string (optional, 'brief' or 'standard')",
+  "pdf": "boolean (optional, default false — generates PDF via pandoc + weasyprint)"
 }
 ```
 
@@ -165,7 +166,8 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Progress markers** | Real-time CLI: ✓ per-goal, 📦 Phase 1, 📝 Phase 2, ✅/❌ eval, 🔧 enhancer, 📄 report |
 | **Stage labels in MCP** | `research_status` returns human-readable stage (e.g. "Searching the web (Phase 1)") alongside percentage |
 | **Web dashboard** | `http://localhost:8100/` — real-time task list with progress bars, stage labels, inline report viewer modal. Auto-refreshes every 5s. |
-| **Launch from GUI** | Dashboard form: topic input + depth selector + Enter-to-submit. Backed by MCP JSON-RPC — zero new backend. |
+| **Launch from GUI** | Dashboard form: topic input + depth selector + PDF checkbox + Enter-to-submit. Backed by MCP JSON-RPC — zero new backend. |
+| **PDF generation** | Opt-in via dashboard checkbox or MCP `pdf: true`. Uses pandoc + weasyprint in Docker. Download link appears alongside "View report" for completed tasks. |
 | **Concurrent execution** | Multiple deep research tasks run in parallel via `asyncio.to_thread`. Unique thread IDs, isolated checkpoints, non-colliding report filenames. Dashboard shows all tasks with independent progress. |
 | **State pruning** | Composer caps lists (messages:20, errors:50, scores:5) — prevents O(N²) checkpoint bloat |
 | **Circuit breaker** | Score stagnation across 2 iterations → force pass, saves API costs |
