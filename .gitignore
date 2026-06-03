@@ -39,3 +39,4 @@ research/
 research_cache.db
 checkpoints.db-shm
 checkpoints.db-wal
+searxng-config/settings.yml.new
