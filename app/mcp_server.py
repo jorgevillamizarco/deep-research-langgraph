@@ -340,7 +340,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
             "total_tokens": 0, "cached_goal_count": 0,
             "depth": depth,
         }
-        thread_id = f"research-{int(time.time())}"
+        thread_id = task_id
         thread_config = {"configurable": {"thread_id": thread_id}}
 
         # Generate plan
@@ -389,7 +389,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         report_dir.mkdir(parents=True, exist_ok=True)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
-        filename = report_dir / f"report_{safe_topic}_{timestamp}.md"
+        filename = report_dir / f"report_{safe_topic}_{timestamp}_{task_id[-12:]}.md"
         with open(filename, "w") as f:
             f.write(report)
 
