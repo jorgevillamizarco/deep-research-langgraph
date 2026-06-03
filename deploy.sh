@@ -82,7 +82,7 @@ do_start() {
     ${ENV_FILE:+--env-file "$ENV_FILE"} \
     -e "SEARXNG_URL=$searxng_url" \
     -e "RESEARCH_OUTPUT_DIR=/data" \
-    -v research_data:/data \
+    -v ~/research:/data \
     "$AGENT_IMAGE"
 
   # Wait for agent
