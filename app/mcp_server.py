@@ -193,6 +193,11 @@ NOT FOR: simple fact lookups (use search tool), real-time data (stock prices, we
                         "description": "Report depth: 'brief' (2-3 paragraph summary, 30-60s) or 'standard' (full report, 2-5 min). Default: standard.",
                         "default": "standard",
                     },
+                    "pdf": {
+                        "type": "boolean",
+                        "description": "Also generate a PDF version of the report (requires pandoc + weasyprint). Default: false.",
+                        "default": False,
+                    },
                 },
                 "required": ["topic"],
             },
@@ -302,7 +307,7 @@ def _push_stream_event(task_id: str, event: dict[str, Any]) -> None:
         loop.call_soon_threadsafe(q.put_nowait, event)
 
 
-def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: str = "standard"):
+def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: str = "standard", pdf: bool = False):
     """Run the full research pipeline in background thread, updating _research_tasks.
 
     Runs in a thread because graph.invoke() is synchronous and would block
@@ -395,11 +400,23 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
 
         _update(task_id, progress=0.95, stage="saving")
 
+        # Generate PDF if requested
+        pdf_path = None
+        if pdf:
+            try:
+                from app.cli import _convert_to_pdf
+                pdf_path = _convert_to_pdf(filename)
+                if pdf_path:
+                    _update(task_id, stage="saving_pdf")
+            except Exception as e:
+                logger.warning("PDF generation failed for task %s: %s", task_id, e)
+
         if task:
             task["status"] = "completed"
             task["progress"] = 1.0
             task["report"] = report
             task["report_path"] = str(filename)
+            task["pdf_path"] = str(pdf_path) if pdf_path else None
             task["char_count"] = len(report)
             task["completed_at"] = time.time()
             _persist_task(task)
@@ -427,6 +444,9 @@ async def _handle_deep_research(
     topic = (arguments or {}).get("topic", "")
     max_iterations = max(1, min(int((arguments or {}).get("max_iterations", 2)), 10))
     depth = (arguments or {}).get("depth", "standard")
+    pdf = (arguments or {}).get("pdf", False)
+    if isinstance(pdf, str):
+        pdf = pdf.lower() in ("true", "1", "yes")
 
     if depth not in ("brief", "standard"):
         depth = "standard"
@@ -446,6 +466,7 @@ async def _handle_deep_research(
             "created_at": now,
             "max_iterations": max_iterations,
             "depth": depth,
+            "pdf": pdf,
         }
 
     # Cleanup stale tasks (>1 hour old)
@@ -456,7 +477,7 @@ async def _handle_deep_research(
             del _research_tasks[tid]
 
     # Launch background task in thread (sync graph.invoke blocks asyncio event loop)
-    asyncio.create_task(asyncio.to_thread(_deep_research_runner, task_id, topic, max_iterations, depth))
+    asyncio.create_task(asyncio.to_thread(_deep_research_runner, task_id, topic, max_iterations, depth, pdf))
 
     return [types.TextContent(
         type="text",
@@ -814,6 +835,7 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
                     "stage": STAGE_LABELS.get(stage_raw, stage_raw),
                     "elapsed": int(now - t.get("created_at", now)),
                     "report_path": t.get("report_path", ""),
+                    "pdf_path": t.get("pdf_path"),
                     "char_count": t.get("char_count", 0),
                 })
         return JSONResponse(tasks)
@@ -902,6 +924,11 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
         <option value="brief">Brief</option>
       </select>
     </div>
+    <div class="form-group" style="justify-content:flex-end">
+      <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer">
+        <input type="checkbox" id="pdf" style="min-width:auto;accent-color:#238636"> PDF
+      </label>
+    </div>
     <button class="btn" id="start-btn" onclick="startResearch()">Start Research</button>
   </div>
   <div class="feedback" id="feedback"></div>
@@ -947,7 +974,8 @@ async function refresh() {
             <div class="progress-fill ${t.status}" style="width:${Math.max(t.progress*100,1)}%"></div>
           </div>
           ${t.status==='completed' && t.report_path
-            ? `<span class="report-link" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</span>`
+            ? `<span class="report-link" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</span>`+
+              (t.pdf_path ? ` <span class="report-link" style="color:#d29922" onclick="window.open('/download/${encodeURIComponent(t.pdf_path.split('/').pop())}')">⬇ PDF</span>` : '')
             : ''}
         </div>
       `).join('');
@@ -964,6 +992,7 @@ function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 async function startResearch() {
   const topic = document.getElementById('topic').value.trim();
   const depth = document.getElementById('depth').value;
+  const pdf = document.getElementById('pdf').checked;
   const btn = document.getElementById('start-btn');
   const fb = document.getElementById('feedback');
   if(!topic) { fb.className='feedback error'; fb.textContent='Please enter a topic.'; return; }
@@ -971,7 +1000,7 @@ async function startResearch() {
   try {
     const reqId = Date.now();
     const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:reqId,method:'tools/call',params:{name:'deep_research',arguments:{topic,depth,max_iterations:2}}})});
+      body:JSON.stringify({jsonrpc:'2.0',id:reqId,method:'tools/call',params:{name:'deep_research',arguments:{topic,depth,pdf,max_iterations:2}}})});
     const data = await resp.json();
     const text = data.result?.content?.[0]?.text || '';
     const match = text.match(/research-[a-f0-9]{8,}/);
@@ -1018,6 +1047,21 @@ setInterval(refresh, 5000);
         from starlette.responses import HTMLResponse
         return HTMLResponse(html)
 
+    async def download_file(request):
+        """Serve a report file for download from the output directory."""
+        import urllib.parse
+        filename = request.path_params.get("filename", "")
+        filename = urllib.parse.unquote(filename)
+        report_dir = _get_report_dir()
+        filepath = report_dir / filename
+        if not filepath.exists() or not filepath.is_file():
+            return JSONResponse({"error": "File not found"}, status_code=404)
+        # Only allow .md and .pdf files
+        if filepath.suffix not in (".md", ".pdf"):
+            return JSONResponse({"error": "File type not allowed"}, status_code=403)
+        from starlette.responses import FileResponse
+        return FileResponse(filepath, filename=filename)
+
     app = Starlette(
         routes=[
             Route("/", endpoint=dashboard, methods=["GET"]),
@@ -1026,6 +1070,7 @@ setInterval(refresh, 5000);
             Route("/mcp", endpoint=handle_sse, methods=["GET"]),
             Route("/mcp", endpoint=mcp_probe, methods=["POST", "OPTIONS"]),
             Route("/stream/{task_id}", endpoint=handle_stream, methods=["GET"]),
+            Route("/download/{filename:path}", endpoint=download_file, methods=["GET"]),
             Mount("/messages/", app=sse.handle_post_message),
         ]
     )
