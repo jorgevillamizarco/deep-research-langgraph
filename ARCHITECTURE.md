@@ -271,6 +271,8 @@ flowchart TB
 | **Stage labels** | `research_status` now returns human-readable pipeline stage (e.g. "Searching the web (Phase 1)") alongside numeric progress. Stage data already available internally from `graph.stream()` per-node mapping — just wasn't surfaced to MCP clients. Added `STAGE_LABELS` dict mapping internal node names to user-facing descriptions. |
 | **Concurrent execution** | Multiple `deep_research` calls spawn separate OS threads via `asyncio.to_thread`. Each task gets a unique `task_id` (used as LangGraph `thread_id` for checkpoint isolation) and unique report filename (`task_id[-12:]` suffix). SQLite connection uses `check_same_thread=False` (WAL mode). Three concurrency bugs found and fixed: global `os.environ` race, `int(time.time())` thread_id collision, same-second report filename collision. |
 | **PDF generation** | Opt-in via MCP `pdf: true` or dashboard checkbox. Calls `_convert_to_pdf()` from CLI module (pandoc + weasyprint) after saving `.md`. Served via `/download/{filename}` route with path traversal protection. PDF adds ~5-10s to research completion. |
+| **Checkpoint persistence** | Checkpoints stored in named Docker volume (`research_checkpoints:/app/checkpoints`) with `CHECKPOINT_DB_PATH` env var. Survives container recreation and deploys — previously lost on every redeploy. |
+| **SearXNG version pin** | Pinned to `2026.6.2-e964708c0` (was `:latest`). Prevents silent breakage from upstream SearXNG releases. |
 
 ## Production Features
 

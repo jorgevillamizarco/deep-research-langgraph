@@ -171,7 +171,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Concurrent execution** | Multiple deep research tasks run in parallel via `asyncio.to_thread`. Unique thread IDs, isolated checkpoints, non-colliding report filenames. Dashboard shows all tasks with independent progress. |
 | **State pruning** | Composer caps lists (messages:20, errors:50, scores:5) — prevents O(N²) checkpoint bloat |
 | **Circuit breaker** | Score stagnation across 2 iterations → force pass, saves API costs |
-| **SQLite checkpointing** | Survives MCP server restarts, zero-config |
+| **SQLite checkpointing** | Survives MCP server restarts, zero-config. Checkpoints stored in named Docker volume (`research_checkpoints`) — survive container recreation and deploys. |
 | **Graceful save** | Report prints to stdout even if file write fails |
 | **DELIVERABLE failsafe** | Prompt mandate + post-processing append + regex failsafe — Phase 2 always executes |
 | **Cross-run cache** | ❌ DEPRECATED — no-ops with deprecation warnings. Fresh research is preferred |

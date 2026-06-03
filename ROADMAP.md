@@ -47,10 +47,10 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] 29 tests (25 unit + 4 E2E), all passing in ~10s
 - [x] Writable directory fallback chain for report output
 - [x] SSE streaming endpoint for real-time progress
-- [ ] Checkpoint DB migration story — no schema versioning
+- [x] Checkpoint DB survives container recreation — named volume `research_checkpoints:/app/checkpoints` (June 2026)
 - [ ] Deep health check — `/health` returns 200 even if LLM is unreachable
 
-**Verdict:** Production-usable for single-user deployment. Supports concurrent research tasks within a single container. Not production-grade for multi-tenant or mission-critical use. The remaining 9 operational gaps are alerting, runbook, rate limiting, horizontal scaling, request queuing, deep health, input sanitization, checkpoint migration, and versioned releases — none architectural.
+**Verdict:** Production-usable for single-user deployment. Supports concurrent research tasks within a single container. Checkpoints persist across deploys. Not production-grade for multi-tenant or mission-critical use. The remaining 8 operational gaps are alerting, runbook, rate limiting, horizontal scaling, request queuing, deep health, input sanitization, and versioned releases — none architectural.
 
 **Research quality improvements (May 2026):**
 - Topic enrichment: raw user topics are pre-processed into structured research briefs with domain context and ambiguity detection
@@ -96,6 +96,8 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Concurrent execution (multiple research tasks run in parallel via asyncio.to_thread + isolated checkpoints)
 - [x] Concurrent bugs fixed (os.environ race, thread_id collision, report filename collision)
 - [x] PDF generation (opt-in via MCP `pdf: true` or dashboard checkbox, pandoc + weasyprint, `/download` route)
+- [x] Checkpoint persistence (named Docker volume `research_checkpoints`, survives container recreation)
+- [x] SearXNG version pinned (2026.6.2-e964708c0, was `:latest`)
 
 ## Technical Debt & Known Issues
 
