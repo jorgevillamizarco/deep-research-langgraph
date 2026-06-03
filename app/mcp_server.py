@@ -326,7 +326,6 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         task["stage"] = "planning"
 
     try:
-        os.environ["MAX_SEARCH_ITERATIONS"] = str(max_iterations)
         graph = build_research_graph()
         initial_state = {
             "topic": topic, "plan_approved": True, "user_feedback": None,
