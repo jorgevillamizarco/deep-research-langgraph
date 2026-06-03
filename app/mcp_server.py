@@ -893,7 +893,7 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
   <div class="form-row">
     <div class="form-group">
       <label for="topic">Topic</label>
-      <input type="text" id="topic" placeholder="e.g. Kubernetes vs Nomad for small teams 2026" autofocus>
+      <input type="text" id="topic" placeholder="e.g. Kubernetes vs Nomad for small teams 2026" autofocus onkeydown="if(event.key==='Enter')startResearch()">
     </div>
     <div class="form-group">
       <label for="depth">Depth</label>
@@ -969,12 +969,13 @@ async function startResearch() {
   if(!topic) { fb.className='feedback error'; fb.textContent='Please enter a topic.'; return; }
   btn.disabled = true; fb.className='feedback'; fb.textContent='Starting…';
   try {
+    const reqId = Date.now();
     const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'deep_research',arguments:{topic,depth,max_iterations:2}}})});
+      body:JSON.stringify({jsonrpc:'2.0',id:reqId,method:'tools/call',params:{name:'deep_research',arguments:{topic,depth,max_iterations:2}}})});
     const data = await resp.json();
     const text = data.result?.content?.[0]?.text || '';
-    const match = text.match(/Task ID:\*\*\s*(\S+)/);
-    const taskId = match ? match[1] : null;
+    const match = text.match(/research-[a-f0-9]{8,}/);
+    const taskId = match ? match[0] : null;
     if(taskId) {
       fb.className='feedback success';
       fb.innerHTML = 'Started <code>'+esc(taskId.slice(0,16))+'</code> — refreshing in 2s';
@@ -998,7 +999,7 @@ async function viewReport(taskId) {
   title.textContent = 'Report • '+taskId.slice(0,16);
   try {
     const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'research_status',arguments:{task_id:taskId}}})});
+      body:JSON.stringify({jsonrpc:'2.0',id:Date.now(),method:'tools/call',params:{name:'research_status',arguments:{task_id:taskId}}})});
     const data = await resp.json();
     const text = data.result?.content?.[0]?.text || 'Report not found';
     body.innerHTML = '<pre>'+esc(text)+'</pre>';
