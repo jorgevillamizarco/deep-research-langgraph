@@ -58,6 +58,7 @@ STAGE_LABELS: dict[str, str] = {
     "refinement_loop": "Refining with deeper research (Phase 2)",
     "composer": "Writing the final report",
     "saving": "Saving report to disk",
+    "saving_pdf": "Generating PDF",
     "error": "Error",
 }
 _TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between restarts
@@ -1009,6 +1010,7 @@ async function startResearch() {
       fb.className='feedback success';
       fb.innerHTML = 'Started <code>'+esc(taskId.slice(0,16))+'</code> — refreshing in 2s';
       document.getElementById('topic').value = '';
+      document.getElementById('pdf').checked = false;
       setTimeout(refresh, 2000);
     } else {
       fb.className='feedback error'; fb.textContent='Failed: no task ID in response';
@@ -1052,8 +1054,11 @@ setInterval(refresh, 5000);
         import urllib.parse
         filename = request.path_params.get("filename", "")
         filename = urllib.parse.unquote(filename)
-        report_dir = _get_report_dir()
-        filepath = report_dir / filename
+        report_dir = _get_report_dir().resolve()
+        filepath = (report_dir / filename).resolve()
+        # Prevent path traversal
+        if not str(filepath).startswith(str(report_dir) + os.sep):
+            return JSONResponse({"error": "Forbidden"}, status_code=403)
         if not filepath.exists() or not filepath.is_file():
             return JSONResponse({"error": "File not found"}, status_code=404)
         # Only allow .md and .pdf files
