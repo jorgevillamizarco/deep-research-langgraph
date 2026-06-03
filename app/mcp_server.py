@@ -868,11 +868,44 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
 .modal-body{overflow-y:auto;padding:1.25rem;flex:1}
 .modal-body pre{white-space:pre-wrap;font-family:monospace;font-size:.85rem;line-height:1.6;color:#c9d1d9;margin:0}
 .modal-loading{padding:2rem;text-align:center;color:#8b949e}
+.new-research{margin-bottom:2rem;padding:1.25rem;background:#161b22;border:1px solid #30363d;border-radius:8px}
+.new-research h3{font-size:.9rem;color:#f0f6fc;margin-bottom:.75rem}
+.form-row{display:flex;gap:.75rem;align-items:flex-end;flex-wrap:wrap}
+.form-group{display:flex;flex-direction:column;gap:.3rem}
+.form-group label{font-size:.75rem;color:#8b949e}
+.form-group input,.form-group select{background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:.5rem .75rem;color:#c9d1d9;font-size:.85rem;outline:none}
+.form-group input:focus,.form-group select:focus{border-color:#1f6feb}
+.form-group input{min-width:400px}
+.form-group select{min-width:130px}
+.btn{background:#238636;color:#fff;border:none;border-radius:6px;padding:.5rem 1.25rem;font-size:.85rem;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{background:#2ea043}
+.btn:disabled{background:#484f58;cursor:not-allowed}
+.feedback{font-size:.8rem;margin-top:.5rem;min-height:1.2em}
+.feedback.success{color:#238636}
+.feedback.error{color:#da3633}
 </style>
 </head>
 <body>
 <h1>Deep Research • Dashboard</h1>
 <p class="subtitle">Monitor research tasks — auto-refreshes every 5s</p>
+<div class="new-research">
+  <h3>New Research</h3>
+  <div class="form-row">
+    <div class="form-group">
+      <label for="topic">Topic</label>
+      <input type="text" id="topic" placeholder="e.g. Kubernetes vs Nomad for small teams 2026" autofocus>
+    </div>
+    <div class="form-group">
+      <label for="depth">Depth</label>
+      <select id="depth">
+        <option value="standard">Standard</option>
+        <option value="brief">Brief</option>
+      </select>
+    </div>
+    <button class="btn" id="start-btn" onclick="startResearch()">Start Research</button>
+  </div>
+  <div class="feedback" id="feedback"></div>
+</div>
 <div id="tasks"><p class="empty">Loading tasks…</p></div>
 <p class="refresh" id="last-update">Last updated: —</p>
 <div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
@@ -928,6 +961,34 @@ async function refresh() {
   }
 }
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function startResearch() {
+  const topic = document.getElementById('topic').value.trim();
+  const depth = document.getElementById('depth').value;
+  const btn = document.getElementById('start-btn');
+  const fb = document.getElementById('feedback');
+  if(!topic) { fb.className='feedback error'; fb.textContent='Please enter a topic.'; return; }
+  btn.disabled = true; fb.className='feedback'; fb.textContent='Starting…';
+  try {
+    const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'deep_research',arguments:{topic,depth,max_iterations:2}}})});
+    const data = await resp.json();
+    const text = data.result?.content?.[0]?.text || '';
+    const match = text.match(/Task ID:\*\*\s*(\S+)/);
+    const taskId = match ? match[1] : null;
+    if(taskId) {
+      fb.className='feedback success';
+      fb.innerHTML = 'Started <code>'+esc(taskId.slice(0,16))+'</code> — refreshing in 2s';
+      document.getElementById('topic').value = '';
+      setTimeout(refresh, 2000);
+    } else {
+      fb.className='feedback error'; fb.textContent='Failed: no task ID in response';
+    }
+  } catch(e) {
+    fb.className='feedback error'; fb.textContent='Failed to start: '+e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
 async function viewReport(taskId) {
   const overlay = document.getElementById('modal-overlay');
   const body = document.getElementById('modal-body');
