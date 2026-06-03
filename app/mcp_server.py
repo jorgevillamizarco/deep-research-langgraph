@@ -48,6 +48,18 @@ _research_lock = asyncio.Lock()
 _stream_queues: dict[str, asyncio.Queue[dict[str, Any]]] = {}
 _stream_lock = asyncio.Lock()
 _main_event_loop: asyncio.AbstractEventLoop | None = None  # Set at server startup
+
+# Human-readable labels for pipeline stages
+STAGE_LABELS: dict[str, str] = {
+    "planning": "Generating research plan",
+    "planner": "Generating research plan",
+    "parallel_researcher": "Searching the web (Phase 1)",
+    "merge_findings": "Synthesizing search findings",
+    "refinement_loop": "Refining with deeper research (Phase 2)",
+    "composer": "Writing the final report",
+    "saving": "Saving report to disk",
+    "error": "Error",
+}
 _TASK_TTL_SECONDS = 86400  # 24 hours — tasks survive between restarts
 
 
@@ -489,6 +501,9 @@ async def _handle_research_status(
 
     if status == "queued" or status == "running":
         elapsed = time.time() - task.get("created_at", time.time())
+        stage = task.get("stage", "")
+        stage_label = STAGE_LABELS.get(stage, stage)
+        progress_pct = task.get("progress", 0)
         return [types.TextContent(
             type="text",
             text=f"""## Research In Progress
@@ -496,7 +511,7 @@ async def _handle_research_status(
 **Task ID:** {task_id}
 **Topic:** {task.get("topic", "")}
 **Status:** {status}
-**Progress:** {task.get("progress", 0):.0%}
+**Stage:** {stage_label} ({progress_pct:.0%})
 **Elapsed:** {elapsed:.0f}s
 
 Poll again in 10-15 seconds."""
