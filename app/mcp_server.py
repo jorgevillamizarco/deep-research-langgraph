@@ -797,8 +797,143 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
             },
         )
 
+    async def tasks_api(request):
+        """Return JSON array of all tasks with progress details."""
+        import time as _time_module
+        tasks = []
+        now = _time_module.time()
+        async with _research_lock:
+            for tid, t in sorted(_research_tasks.items(),
+                                 key=lambda x: x[1].get("created_at", 0),
+                                 reverse=True):
+                stage_raw = t.get("stage", "")
+                tasks.append({
+                    "task_id": tid,
+                    "topic": t.get("topic", ""),
+                    "status": t.get("status", "unknown"),
+                    "progress": t.get("progress", 0),
+                    "stage": STAGE_LABELS.get(stage_raw, stage_raw),
+                    "elapsed": int(now - t.get("created_at", now)),
+                    "report_path": t.get("report_path", ""),
+                    "char_count": t.get("char_count", 0),
+                })
+        return JSONResponse(tasks)
+
+    async def dashboard(request):
+        """Serve the monitoring dashboard HTML page."""
+        html = r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Deep Research — Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#c9d1d9;padding:2rem;min-height:100vh}
+h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
+.subtitle{color:#8b949e;margin-bottom:2rem;font-size:.9rem}
+.task{border:1px solid #30363d;border-radius:8px;padding:1.25rem;margin-bottom:1rem;background:#161b22}
+.task-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}
+.task-topic{font-weight:600;color:#f0f6fc;flex:1;margin-right:1rem}
+.task-id{font-size:.75rem;color:#484f58;font-family:monospace}
+.progress-bar{width:100%;height:6px;background:#21262d;border-radius:3px;margin:.5rem 0 .75rem;overflow:hidden}
+.progress-fill{height:100%;border-radius:3px;transition:width .5s ease}
+.progress-fill.running{background:#238636}
+.progress-fill.completed{background:#1f6feb}
+.progress-fill.failed{background:#da3633}
+.progress-fill.queued{background:#484f58}
+.task-meta{display:flex;gap:1.5rem;font-size:.85rem;color:#8b949e;flex-wrap:wrap}
+.task-meta span{display:flex;align-items:center;gap:.35rem}
+.status-badge{display:inline-block;padding:.15rem .55rem;border-radius:12px;font-size:.75rem;font-weight:600}
+.status-badge.running{background:#238636;color:#fff}
+.status-badge.completed{background:#1f6feb;color:#fff}
+.status-badge.failed{background:#da3633;color:#fff}
+.status-badge.queued{background:#484f58;color:#c9d1d9}
+.report-link{display:inline-block;margin-top:.75rem;color:#58a6ff;text-decoration:none;font-size:.85rem}
+.report-link:hover{text-decoration:underline}
+.empty{text-align:center;color:#484f58;padding:3rem;font-size:1.1rem}
+.indicator{width:8px;height:8px;border-radius:50%;display:inline-block}
+.indicator.running{background:#238636;animation:pulse 1.5s ease-in-out infinite}
+.indicator.completed{background:#1f6feb}
+.indicator.failed{background:#da3633}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.refresh{color:#8b949e;font-size:.8rem;margin-top:1.5rem;text-align:center}
+</style>
+</head>
+<body>
+<h1>Deep Research • Dashboard</h1>
+<p class="subtitle">Monitor research tasks — auto-refreshes every 5s</p>
+<div id="tasks"><p class="empty">Loading tasks…</p></div>
+<p class="refresh" id="last-update">Last updated: —</p>
+<script>
+const STAGE_COLORS = {
+  'planning':'#8b949e','planner':'#8b949e',
+  'parallel_researcher':'#238636',
+  'merge_findings':'#9c6ade',
+  'refinement_loop':'#d29922',
+  'composer':'#1f6feb',
+  'saving':'#8b949e','error':'#da3633'
+};
+function stageColor(stage) {
+  for(const [k,v] of Object.entries(STAGE_COLORS))
+    if(stage.includes(k)) return v;
+  return '#484f58';
+}
+async function refresh() {
+  try {
+    const resp = await fetch('/tasks');
+    const tasks = await resp.json();
+    const el = document.getElementById('tasks');
+    if(!tasks.length) {
+      el.innerHTML = '<p class="empty">No research tasks yet.<br><small>Start one via MCP or CLI.</small></p>';
+    } else {
+      el.innerHTML = tasks.map(t => `
+        <div class="task">
+          <div class="task-header">
+            <span class="task-topic">${esc(t.topic)}</span>
+            <span class="task-id">${t.task_id.slice(0,16)}</span>
+          </div>
+          <div class="task-meta">
+            <span><span class="indicator ${t.status}"></span> <span class="status-badge ${t.status}">${t.status}</span></span>
+            <span>${t.stage || '—'}</span>
+            <span>${Math.floor(t.progress*100)}%</span>
+            <span>${t.elapsed}s</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill ${t.status}" style="width:${Math.max(t.progress*100,1)}%"></div>
+          </div>
+          ${t.status==='completed' && t.report_path
+            ? `<a class="report-link" href="javascript:void(0)" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</a>`
+            : ''}
+        </div>
+      `).join('');
+    }
+    document.getElementById('last-update').textContent = 'Last updated: '+new Date().toLocaleTimeString();
+  } catch(e){}
+}
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function viewReport(taskId) {
+  try {
+    const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'research_status',arguments:{task_id:taskId}}})});
+    const data = await resp.json();
+    const text = data.result?.content?.[0]?.text || 'Report not found';
+    const w = window.open('','_blank','width=900,height=700');
+    w.document.write('<pre style="white-space:pre-wrap;font-family:monospace;padding:2rem;background:#0d1117;color:#c9d1d9;line-height:1.6">'+esc(text)+'</pre>');
+  } catch(e) { alert('Failed to load report: '+e.message); }
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>"""
+        from starlette.responses import HTMLResponse, Response as StarletteResponse
+        return HTMLResponse(html)
+
     app = Starlette(
         routes=[
+            Route("/", endpoint=dashboard, methods=["GET"]),
+            Route("/tasks", endpoint=tasks_api, methods=["GET"]),
             Route("/health", endpoint=health_check),
             Route("/mcp", endpoint=handle_sse, methods=["GET"]),
             Route("/mcp", endpoint=mcp_probe, methods=["POST", "OPTIONS"]),
