@@ -323,6 +323,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
     if task:
         task["status"] = "running"
         task["progress"] = 0.05
+        task["stage"] = "planning"
 
     try:
         os.environ["MAX_SEARCH_ITERATIONS"] = str(max_iterations)
