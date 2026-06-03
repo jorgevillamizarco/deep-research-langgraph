@@ -50,7 +50,7 @@ do_start() {
       --network research-net \
       --restart unless-stopped \
       -v "$SCRIPT_DIR/searxng-config:/etc/searxng:rw" \
-      searxng/searxng
+      searxng/searxng:2026.6.2-e964708c0
 
     for i in $(seq 1 15); do
       docker run --rm --network research-net alpine sh -c \
@@ -82,7 +82,9 @@ do_start() {
     ${ENV_FILE:+--env-file "$ENV_FILE"} \
     -e "SEARXNG_URL=$searxng_url" \
     -e "RESEARCH_OUTPUT_DIR=/data" \
+    -e "CHECKPOINT_DB_PATH=/app/checkpoints/checkpoints.db" \
     -v ~/research:/data \
+    -v research_checkpoints:/app/checkpoints \
     "$AGENT_IMAGE"
 
   # Wait for agent
