@@ -849,15 +849,26 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
 .status-badge.completed{background:#1f6feb;color:#fff}
 .status-badge.failed{background:#da3633;color:#fff}
 .status-badge.queued{background:#484f58;color:#c9d1d9}
-.report-link{display:inline-block;margin-top:.75rem;color:#58a6ff;text-decoration:none;font-size:.85rem}
+.report-link{display:inline-block;margin-top:.75rem;color:#58a6ff;text-decoration:none;font-size:.85rem;cursor:pointer}
 .report-link:hover{text-decoration:underline}
 .empty{text-align:center;color:#484f58;padding:3rem;font-size:1.1rem}
+.error-msg{text-align:center;color:#da3633;padding:3rem;font-size:1rem}
 .indicator{width:8px;height:8px;border-radius:50%;display:inline-block}
 .indicator.running{background:#238636;animation:pulse 1.5s ease-in-out infinite}
 .indicator.completed{background:#1f6feb}
 .indicator.failed{background:#da3633}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .refresh{color:#8b949e;font-size:.8rem;margin-top:1.5rem;text-align:center}
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.active{display:flex}
+.modal{background:#161b22;border:1px solid #30363d;border-radius:8px;max-width:900px;max-height:85vh;width:90%;overflow:hidden;display:flex;flex-direction:column}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid #30363d}
+.modal-header h2{font-size:1rem;color:#f0f6fc;margin:0}
+.modal-close{background:none;border:none;color:#8b949e;font-size:1.5rem;cursor:pointer;line-height:1}
+.modal-close:hover{color:#f0f6fc}
+.modal-body{overflow-y:auto;padding:1.25rem;flex:1}
+.modal-body pre{white-space:pre-wrap;font-family:monospace;font-size:.85rem;line-height:1.6;color:#c9d1d9;margin:0}
+.modal-loading{padding:2rem;text-align:center;color:#8b949e}
 </style>
 </head>
 <body>
@@ -865,24 +876,25 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
 <p class="subtitle">Monitor research tasks — auto-refreshes every 5s</p>
 <div id="tasks"><p class="empty">Loading tasks…</p></div>
 <p class="refresh" id="last-update">Last updated: —</p>
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Report</h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body">
+      <p class="modal-loading">Loading report…</p>
+    </div>
+  </div>
+</div>
 <script>
-const STAGE_COLORS = {
-  'planning':'#8b949e','planner':'#8b949e',
-  'parallel_researcher':'#238636',
-  'merge_findings':'#9c6ade',
-  'refinement_loop':'#d29922',
-  'composer':'#1f6feb',
-  'saving':'#8b949e','error':'#da3633'
-};
-function stageColor(stage) {
-  for(const [k,v] of Object.entries(STAGE_COLORS))
-    if(stage.includes(k)) return v;
-  return '#484f58';
-}
+let fetchErrorCount = 0;
 async function refresh() {
   try {
     const resp = await fetch('/tasks');
+    if(!resp.ok) throw new Error('HTTP '+resp.status);
     const tasks = await resp.json();
+    fetchErrorCount = 0;
     const el = document.getElementById('tasks');
     if(!tasks.length) {
       el.innerHTML = '<p class="empty">No research tasks yet.<br><small>Start one via MCP or CLI.</small></p>';
@@ -903,31 +915,46 @@ async function refresh() {
             <div class="progress-fill ${t.status}" style="width:${Math.max(t.progress*100,1)}%"></div>
           </div>
           ${t.status==='completed' && t.report_path
-            ? `<a class="report-link" href="javascript:void(0)" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</a>`
+            ? `<span class="report-link" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</span>`
             : ''}
         </div>
       `).join('');
     }
     document.getElementById('last-update').textContent = 'Last updated: '+new Date().toLocaleTimeString();
-  } catch(e){}
+  } catch(e) {
+    fetchErrorCount++;
+    if(fetchErrorCount > 2) {
+      document.getElementById('tasks').innerHTML = '<p class="error-msg">Cannot reach server — check if container is running.</p>';
+    }
+  }
 }
 function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 async function viewReport(taskId) {
+  const overlay = document.getElementById('modal-overlay');
+  const body = document.getElementById('modal-body');
+  const title = document.getElementById('modal-title');
+  overlay.classList.add('active');
+  body.innerHTML = '<p class="modal-loading">Loading report…</p>';
+  title.textContent = 'Report • '+taskId.slice(0,16);
   try {
     const resp = await fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'research_status',arguments:{task_id:taskId}}})});
     const data = await resp.json();
     const text = data.result?.content?.[0]?.text || 'Report not found';
-    const w = window.open('','_blank','width=900,height=700');
-    w.document.write('<pre style="white-space:pre-wrap;font-family:monospace;padding:2rem;background:#0d1117;color:#c9d1d9;line-height:1.6">'+esc(text)+'</pre>');
-  } catch(e) { alert('Failed to load report: '+e.message); }
+    body.innerHTML = '<pre>'+esc(text)+'</pre>';
+  } catch(e) {
+    body.innerHTML = '<p class="error-msg">Failed to load report: '+esc(e.message)+'</p>';
+  }
+}
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('active');
 }
 refresh();
 setInterval(refresh, 5000);
 </script>
 </body>
 </html>"""
-        from starlette.responses import HTMLResponse, Response as StarletteResponse
+        from starlette.responses import HTMLResponse
         return HTMLResponse(html)
 
     app = Starlette(
