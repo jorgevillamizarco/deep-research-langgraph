@@ -234,23 +234,40 @@ def fetch_url_content(url: str, max_chars: int = 8000) -> str:
 
     # First attempt: HTTP extraction (fast, works for most static pages)
     text = _fetch_via_http(url, max_chars)
-    if text and len(text) >= 500:
+    if text and len(text) >= 500 and not _is_error_page(text):
         return text[:max_chars]
 
-    # Second attempt: headless browser (JS-rendered pages, SPAs)
-    if text and len(text) < 500:
-        logger.info("HTTP extraction returned only %d chars from %s, "
-                     "trying browser fallback", len(text), url[:80])
-    else:
-        logger.info("HTTP extraction failed for %s, "
-                     "trying browser fallback", url[:80])
+    # Second attempt: headless browser (JS-rendered pages, SPAs, error pages)
+    if text:
+        reason = "error page" if _is_error_page(text) else f"only {len(text)} chars"
+        logger.info("HTTP extraction %s from %s, trying browser fallback", reason, url[:80])
 
-    browser_text = _fetch_via_browser(url, max_chars, follow_links=2)  # follow 2 relevant links
+    browser_text = _fetch_via_browser(url, max_chars, follow_links=3)  # follow 3 relevant links (more for deep navigation)
     if browser_text:
         return browser_text[:max_chars]
 
     # Return whatever HTTP got, even if sparse
     return text[:max_chars]
+
+
+def _is_error_page(text: str) -> bool:
+    """Detect if extracted text looks like a 404/error page rather than real content."""
+    if len(text) < 100:
+        return False  # too short to tell
+    lower = text.lower()
+    # HTTP error indicators
+    error_signals = [
+        "404 not found", "403 forbidden", "500 internal server",
+        "page not found", "no encontrada", "página no encontrada",
+        "no encontrado", "no existe", "does not exist",
+        "the requested url was not found", "erreur 404",
+    ]
+    if any(signal in lower for signal in error_signals):
+        return True
+    # Very short text that's mostly navigation boilerplate
+    if len(text) < 500 and lower.count("\n") < 5:
+        return True
+    return False
 
 
 def _fetch_via_http(url: str, max_chars: int = 8000) -> str:
@@ -323,6 +340,28 @@ def _fetch_via_browser(url: str, max_chars: int = 8000, follow_links: int = 0) -
 
             # Extract visible text from the page body
             text = _extract_page_text(page)
+
+            # If this is an error page and we can follow links, try domain root
+            if _is_error_page(text) and follow_links > 0:
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                root_url = f"{parsed.scheme}://{parsed.netloc}"
+                logger.info("Got error page for %s, trying domain root %s", url[:60], root_url)
+                try:
+                    page.goto(root_url, wait_until="networkidle", timeout=20000)
+                    page.wait_for_timeout(1000)
+                    root_text = _extract_page_text(page)
+                    if root_text and not _is_error_page(root_text):
+                        text = root_text
+                        # Follow links from root instead
+                        linked_texts = _follow_links(page, browser, root_url, follow_links, max_chars)
+                        if linked_texts:
+                            text += "\n\n## Linked Pages\n\n" + "\n\n".join(linked_texts)
+                        browser.close()
+                        lines = [line.strip() for line in text.splitlines() if line.strip()]
+                        return "\n".join(lines)
+                except Exception:
+                    pass  # root fallback failed, continue with error page content
 
             # Multi-page: follow relevant links
             if follow_links > 0:

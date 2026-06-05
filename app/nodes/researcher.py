@@ -100,7 +100,7 @@ Return ONLY a JSON array of strings, one query per item. Example:
         if i == 0 and content and len(content) < 3000:
             # HTTP gave sparse content — browser might find more
             from app.tools.search import _fetch_via_browser
-            browser_content = _fetch_via_browser(url, max_chars=5000, follow_links=1)
+            browser_content = _fetch_via_browser(url, max_chars=5000, follow_links=2)
             if browser_content and len(browser_content) > len(content):
                 fetched_content[-1] = f"## Source (browser): {url}\n\n{browser_content[:5000]}\n"
     if fetched_content:
