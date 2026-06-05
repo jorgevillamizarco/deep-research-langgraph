@@ -99,6 +99,7 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Checkpoint persistence (named Docker volume `research_checkpoints`, survives container recreation)
 - [x] SearXNG version pinned (2026.6.2-e964708c0, was `:latest`)
 - [x] Language-aware search (enrichment → planner annotation → researcher query generation in target language)
+- [x] Error page detection (404/403/500 detection in 4 languages, domain-root fallback, prevents synthesis from error pages)
 
 ## Technical Debt & Known Issues
 

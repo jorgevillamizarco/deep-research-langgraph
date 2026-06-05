@@ -274,6 +274,7 @@ flowchart TB
 | **Checkpoint persistence** | Checkpoints stored in named Docker volume (`research_checkpoints:/app/checkpoints`) with `CHECKPOINT_DB_PATH` env var. Survives container recreation and deploys — previously lost on every redeploy. |
 | **SearXNG version pin** | Pinned to `2026.6.2-e964708c0` (was `:latest`). Prevents silent breakage from upstream SearXNG releases. |
 | **Language-aware search** | Three-layer fix for jurisdiction-specific topics. Enrichment detects country/language (e.g., "Spanish immigration law → search in Spanish"). Planner annotates RESEARCH goals with `(search in LANGUAGE; sources: domain1, domain2)`. Researcher regex extracts language, forces query generation in target language, and notes non-English sources in synthesis. Verified: 64 citations from Spanish legal sources vs. fabricated case numbers in prior English-only runs. |
+| **Error page detection** | `_is_error_page()` detects 404/403/500 pages in Spanish, English, German, Japanese (language-agnostic keyword matching + short-boilerplate heuristic). In `fetch_url_content`: HTTP error pages force browser fallback even when >500 chars. In `_fetch_via_browser`: error pages trigger domain-root navigation + link-following from root. Root-fallback failure returns empty (prevents synthesizing from error page content). Link-following depth increased from 2→3 in fetch_url_content, 1→2 in researcher. |
 
 ## Production Features
 

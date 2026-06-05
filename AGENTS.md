@@ -194,7 +194,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Verification pass** | After Phase 1 synthesis, cross-checks for domain mismatches via targeted search. Catches errors like finding manufacturing PRR when user wants software PRR. |
 | **Smarter browser** | HTTP for all top URLs + browser with link-following for #1 result when content is sparse. Follows relevant same-domain links. |
 | **Type-safe accessors** | `findings_from_state()` / `findings_to_state()` / `get_typed_sources()` — typed Pydantic wrappers around string-based state, citation extraction without regex |
-| **Language-aware search** | Enrichment detects jurisdiction/language requirements (e.g., Spanish immigration law). Planner annotates goals with `(search in Spanish; sources: ...)`. Researcher generates queries in target language. Verified: 52 cited URLs from Spanish legal sources (abogadaiskra.es, arc-legal.es, civio.es) vs. fabricated case numbers in prior runs. |
+| **Language-aware search** | Enrichment detects jurisdiction/language requirements (e.g., Spanish immigration law). Planner annotates goals with `(search in Spanish; sources: ...)`. Researcher generates queries in target language. Verified: 64 citations from Spanish legal sources vs. fabricated case numbers in prior English-only runs. Error page detection + domain-root fallback recovers from stale/moved URLs. |
 | **29 tests** | 25 unit + 4 E2E scenarios, all passing in ~10s |
 
 ## Quality Pipeline
