@@ -273,6 +273,7 @@ flowchart TB
 | **PDF generation** | Opt-in via MCP `pdf: true` or dashboard checkbox. Calls `_convert_to_pdf()` from CLI module (pandoc + weasyprint) after saving `.md`. Served via `/download/{filename}` route with path traversal protection. PDF adds ~5-10s to research completion. |
 | **Checkpoint persistence** | Checkpoints stored in named Docker volume (`research_checkpoints:/app/checkpoints`) with `CHECKPOINT_DB_PATH` env var. Survives container recreation and deploys — previously lost on every redeploy. |
 | **SearXNG version pin** | Pinned to `2026.6.2-e964708c0` (was `:latest`). Prevents silent breakage from upstream SearXNG releases. |
+| **Language-aware search** | Three-layer fix for jurisdiction-specific topics. Enrichment detects country/language (e.g., "Spanish immigration law → search in Spanish"). Planner annotates RESEARCH goals with `(search in LANGUAGE; sources: domain1, domain2)`. Researcher regex extracts language, forces query generation in target language, and notes non-English sources in synthesis. Verified: 64 citations from Spanish legal sources vs. fabricated case numbers in prior English-only runs. |
 
 ## Production Features
 

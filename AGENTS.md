@@ -194,7 +194,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Verification pass** | After Phase 1 synthesis, cross-checks for domain mismatches via targeted search. Catches errors like finding manufacturing PRR when user wants software PRR. |
 | **Smarter browser** | HTTP for all top URLs + browser with link-following for #1 result when content is sparse. Follows relevant same-domain links. |
 | **Type-safe accessors** | `findings_from_state()` / `findings_to_state()` / `get_typed_sources()` — typed Pydantic wrappers around string-based state, citation extraction without regex |
-| **Browser extraction** | Playwright + system Chromium (apt) — verified 11K chars from JS-rendered pages. Two-stage: HTTP → browser fallback |
+| **Language-aware search** | Enrichment detects jurisdiction/language requirements (e.g., Spanish immigration law). Planner annotates goals with `(search in Spanish; sources: ...)`. Researcher generates queries in target language. Verified: 52 cited URLs from Spanish legal sources (abogadaiskra.es, arc-legal.es, civio.es) vs. fabricated case numbers in prior runs. |
 | **29 tests** | 25 unit + 4 E2E scenarios, all passing in ~10s |
 
 ## Quality Pipeline
@@ -260,3 +260,5 @@ Lessons from building and iterating on this agent:
 **Concurrent execution exposed three hidden bugs.** Two research tasks running simultaneously surfaced: (1) `os.environ["MAX_SEARCH_ITERATIONS"]` was a global race — fixed by removing it (nodes read from state, not env). (2) `thread_id` used `int(time.time())` (second granularity) — two tasks in the same second shared a checkpoint namespace. Fixed by using the UUID `task_id`. (3) Report filenames collided on same-second timestamp — fixed by appending `task_id[-12:]` suffix. All three bugs were invisible under single-task testing.
 
 **Stage labels turn blind polling into informed waiting.** `research_status` returning "Refining with deeper research (Phase 2) (65%)" tells the calling agent where it is in the pipeline. The stage data was already available internally from `graph.stream()` — it just wasn't surfaced to MCP clients. A 15-line change with zero performance impact.
+
+**Search language is not optional for jurisdiction-specific topics.** A research agent that searches in English for Spanish legal sources will hallucinate case numbers and claim information "cannot be found." The fix is three-layer: enrichment detects jurisdiction/language, planner annotates goals with `(search in LANGUAGE; sources: ...)`, and researcher extracts the annotation and forces queries in the target language. The regex must handle variations (`search in`, `buscar en`, `rechercher en`) and gracefully degrade for non-jurisdiction topics. This pattern generalizes to any region-specific research: German tax law, French labor code, Japanese patent law.

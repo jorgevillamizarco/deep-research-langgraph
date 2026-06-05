@@ -98,6 +98,7 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] PDF generation (opt-in via MCP `pdf: true` or dashboard checkbox, pandoc + weasyprint, `/download` route)
 - [x] Checkpoint persistence (named Docker volume `research_checkpoints`, survives container recreation)
 - [x] SearXNG version pinned (2026.6.2-e964708c0, was `:latest`)
+- [x] Language-aware search (enrichment → planner annotation → researcher query generation in target language)
 
 ## Technical Debt & Known Issues
 
