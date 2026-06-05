@@ -51,7 +51,12 @@ def _research_single_goal(goal: str, search_tool: Any, llm: Any) -> ResearchFind
     Returns a structured ResearchFinding with pre-extracted citations.
     """
     # Step 1: Generate 4-5 search queries for this goal
+    # Extract language hints from goal annotations (e.g., "search in Spanish")
+    lang_match = re.search(r'(?:search|buscar|rechercher)\s+(?:in|using|language:?\s+|en|auf)\s+([^;)]+)', goal, re.IGNORECASE)
+    target_lang = lang_match.group(1).strip().rstrip('.') if lang_match else None
+
     query_prompt = f"""You are a research specialist. For the following research goal, generate 4-5 highly specific web search queries.
+{f'''IMPORTANT: Generate ALL queries in {target_lang}. Search for {target_lang}-language sources on {target_lang}-language websites.''' if target_lang else ''}
 
 Goal: {goal}
 
@@ -105,6 +110,7 @@ Return ONLY a JSON array of strings, one query per item. Example:
     combined_searches = "\n\n".join(search_results)
 
     synthesis_prompt = f"""You are a research analyst. Synthesize the search results below into a detailed, coherent summary.
+{f'''NOTE: Sources may be in {target_lang}. Translated claims are acceptable — preserve original terminology in parentheses where relevant.''' if target_lang else ''}
 
 RESEARCH GOAL: {goal}
 

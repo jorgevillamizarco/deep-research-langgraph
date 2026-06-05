@@ -59,6 +59,12 @@ DOMAIN DISAMBIGUATION: If the topic mentions terms with multiple meanings across
 add at least one RESEARCH goal that explicitly investigates the term in the context of the topic's domain.
 For example: "[RESEARCH] Investigate how Production Readiness Review (PRR) is applied in software engineering contexts."
 
+JURISDICTION-SPECIFIC TOPICS: If the enrichment brief identifies a specific country, legal system, or language region,
+you MUST annotate EVERY [RESEARCH] goal with the search language and key domains in parentheses at the end.
+Format: "(search in LANGUAGE; sources: domain1, domain2, ...)"
+Example: "[RESEARCH] Analyze recent Tribunal Supremo rulings on nationality by residence under RD 1155/2024 (search in Spanish; sources: boe.es, poderjudicial.es, noticiasjuridicas.com, law firm blogs in Spanish)."
+Failure to annotate jurisdiction-specific goals will result in research queries in the wrong language and unusable results.
+
 CRITICAL: Include at least 1-2 [DELIVERABLE] goals. These are synthesis artifacts (comparison matrices, decision frameworks,
 ranked lists, summary tables) built from the research findings. A plan with only [RESEARCH] goals is INCOMPLETE.
 
@@ -148,7 +154,7 @@ def enrich_topic(topic: str, llm: Any | None = None) -> str:
 
     system_prompt = """You are a research methodologist. Given a research topic, produce a structured brief
 that helps downstream agents plan better research. Identify domain context,
-potential ambiguities, and what a good answer looks like.
+potential ambiguities, jurisdiction/language requirements, and what a good answer looks like.
 
 Return ONLY the brief text. Do NOT include preamble or explanation."""
 
@@ -160,11 +166,17 @@ Produce a structured research brief covering:
 2. AMBIGUITIES: Are there terms with multiple meanings across domains?
    (e.g., "PRR" = manufacturing review vs software readiness review,
    "pipeline" = CI/CD vs data processing vs sales)
-3. EXPECTED OUTPUT: What format should the final answer take?
+3. JURISDICTION & LANGUAGE: Is this topic tied to a specific country, legal system,
+   or language region? If so, what language should search queries use?
+   (e.g., "Spanish immigration law" → search in Spanish on .es domains,
+   "German tax code" → search in German on .de domains,
+   "French labor law" → search in French). Be explicit.
+4. EXPECTED OUTPUT: What format should the final answer take?
    (comparison matrix, ranked list, decision framework, narrative analysis)
-4. KEY DIMENSIONS: What specific attributes or axes should be compared/analyzed?
-5. SOURCE DIVERSITY: What types of sources are needed?
-   (official standards, academic papers, engineering blogs, vendor docs)
+5. KEY DIMENSIONS: What specific attributes or axes should be compared/analyzed?
+6. SOURCE DIVERSITY: What types of sources are needed?
+   (official standards, academic papers, engineering blogs, vendor docs,
+   government gazettes, legal databases, local-language law firm analyses)
 
 Be concise but specific. The planner will use this to generate better research goals."""
 
