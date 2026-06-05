@@ -241,6 +241,8 @@ def fetch_url_content(url: str, max_chars: int = 8000) -> str:
     if text:
         reason = "error page" if _is_error_page(text) else f"only {len(text)} chars"
         logger.info("HTTP extraction %s from %s, trying browser fallback", reason, url[:80])
+    else:
+        logger.info("HTTP extraction failed for %s, trying browser fallback", url[:80])
 
     browser_text = _fetch_via_browser(url, max_chars, follow_links=3)  # follow 3 relevant links (more for deep navigation)
     if browser_text:
@@ -252,21 +254,28 @@ def fetch_url_content(url: str, max_chars: int = 8000) -> str:
 
 def _is_error_page(text: str) -> bool:
     """Detect if extracted text looks like a 404/error page rather than real content."""
-    if len(text) < 100:
-        return False  # too short to tell
+    if not text:
+        return False
     lower = text.lower()
-    # HTTP error indicators
+    # HTTP error indicators (language-agnostic patterns)
+    # Check these FIRST — even short error messages should be caught
     error_signals = [
         "404 not found", "403 forbidden", "500 internal server",
         "page not found", "no encontrada", "página no encontrada",
         "no encontrado", "no existe", "does not exist",
         "the requested url was not found", "erreur 404",
+        "nicht gefunden", "非表示",  # German, Japanese
     ]
     if any(signal in lower for signal in error_signals):
         return True
-    # Very short text that's mostly navigation boilerplate
-    if len(text) < 500 and lower.count("\n") < 5:
-        return True
+    # For pages without explicit error text: check if it's boilerplate
+    if len(text) < 100:
+        return False  # too short to classify without error keywords
+    # Suspicious: short pages with very few substantive words
+    if len(text) < 300:
+        words = [w for w in text.split() if len(w) > 6]
+        if len(words) < 3:
+            return True
     return False
 
 
@@ -362,6 +371,11 @@ def _fetch_via_browser(url: str, max_chars: int = 8000, follow_links: int = 0) -
                         return "\n".join(lines)
                 except Exception:
                     pass  # root fallback failed, continue with error page content
+
+                # Root fallback also failed — return empty to avoid synthesizing from error page
+                browser.close()
+                logger.warning("Domain root also unreachable for %s, skipping", url[:80])
+                return ""
 
             # Multi-page: follow relevant links
             if follow_links > 0:
