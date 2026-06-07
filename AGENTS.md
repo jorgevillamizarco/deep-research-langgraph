@@ -28,7 +28,7 @@ Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_
 
 **CLI:** `python -m app.cli --auto "topic"` (auto-approve plan)
 **MCP:** `python -m app.mcp_server --transport sse --port 8100`
-**Dashboard:** `http://localhost:8100/` (web GUI — launch + monitor + read reports)
+**Dashboard:** `http://localhost:8100/` (web GUI — launch + monitor + read reports; local/private-network by default, set `DASHBOARD_PUBLIC=1` to expose remotely)
 **Docker:** `docker compose up -d` (includes SearXNG)
 
 ## Key Files
@@ -94,6 +94,7 @@ hermes mcp add research --url http://localhost:8100/mcp
 | `MAX_SEARCH_ITERATIONS` | `3` | Max critique loops |
 | `RESEARCH_OUTPUT_DIR` | `/data` | Report output directory (mount host path here) |
 | `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
+| `DASHBOARD_PUBLIC` | unset | Set to `1`/`true` to expose dashboard/task/download routes beyond local/private-network clients |
 
 **Multi-model support:** Set `WORKER_MODEL` for research/composition and `CRITIC_MODEL` for evaluation. Critic defaults to `deepseek-v4-pro` (stronger than worker). The evaluator warns loudly if critic == worker — same-model evaluation produces inflated scores (LLMs grading their own output).
 
@@ -165,7 +166,7 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 |---------|-----|
 | **Progress markers** | Real-time CLI: ✓ per-goal, 📦 Phase 1, 📝 Phase 2, ✅/❌ eval, 🔧 enhancer, 📄 report |
 | **Stage labels in MCP** | `research_status` returns human-readable stage (e.g. "Searching the web (Phase 1)") alongside percentage |
-| **Web dashboard** | `http://localhost:8100/` — real-time task list with progress bars, stage labels, inline report viewer modal. Auto-refreshes every 5s. |
+| **Web dashboard** | `http://localhost:8100/` — real-time task list with progress bars, stage labels, inline report viewer modal. Auto-refreshes every 5s. Local/private-network access only by default; set `DASHBOARD_PUBLIC=1` to expose remotely. `/tasks` returns sanitized filenames only — no absolute report paths. |
 | **Launch from GUI** | Dashboard form: topic input + depth selector + PDF checkbox + Enter-to-submit. Backed by MCP JSON-RPC — zero new backend. |
 | **PDF generation** | Opt-in via dashboard checkbox or MCP `pdf: true`. Uses pandoc + weasyprint in Docker. Download link appears alongside "View report" for completed tasks. |
 | **Concurrent execution** | Multiple deep research tasks run in parallel via `asyncio.to_thread`. Unique thread IDs, isolated checkpoints, non-colliding report filenames. Dashboard shows all tasks with independent progress. |
@@ -194,8 +195,9 @@ The 3 tools (`search`, `deep_research`, `research_status`) are auto-discovered.
 | **Verification pass** | After Phase 1 synthesis, cross-checks for domain mismatches via targeted search. Catches errors like finding manufacturing PRR when user wants software PRR. |
 | **Smarter browser** | HTTP for all top URLs + browser with link-following for #1 result when content is sparse. Follows relevant same-domain links. |
 | **Type-safe accessors** | `findings_from_state()` / `findings_to_state()` / `get_typed_sources()` — typed Pydantic wrappers around string-based state, citation extraction without regex |
-| **Language-aware search** | Enrichment detects jurisdiction/language requirements (e.g., Spanish immigration law). Planner annotates goals with `(search in Spanish; sources: ...)`. Researcher generates queries in target language. Verified: 64 citations from Spanish legal sources vs. fabricated case numbers in prior English-only runs. Error page detection + domain-root fallback recovers from stale/moved URLs. |
-| **29 tests** | 25 unit + 4 E2E scenarios, all passing in ~10s |
+| **Language-aware search** | Enrichment detects jurisdiction/language requirements (e.g., Spanish immigration law). Planner annotates goals with `(search in Spanish; sources: ...)`. Researcher generates queries in target language, passes the language hint into the search backend, SearXNG honors the requested language, Tavily routes non-English searches through SearXNG when available, and the DDGS fallback maps hints to locale regions. Error page detection + domain-root fallback recovers from stale/moved URLs. |
+| **HTTP/MCP surface tests** | `tests/test_mcp_server.py` covers POST `/mcp` initialize/tools-list, `/tasks` persisted-task recovery, `/ready`, `/download` traversal protection, local/private-network dashboard gating, spoofed header rejection, `/stream/{task_id}` terminal events, and dashboard load. |
+| **48 tests** | Unit + E2E + HTTP/MCP route scenarios, all passing |
 
 ## Quality Pipeline
 

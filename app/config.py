@@ -4,7 +4,7 @@ Follows ADK's ResearchConfiguration pattern with dataclass + env var defaults.
 """
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -24,18 +24,18 @@ class ResearchConfig:
         enable_evaluator: Whether to run the evaluator LLM (default: true).
     """
 
-    worker_model: str = os.getenv("WORKER_MODEL", "deepseek-v4-flash")
-    critic_model: str = os.getenv("CRITIC_MODEL", "deepseek-v4-pro")
-    max_search_iterations: int = int(os.getenv("MAX_SEARCH_ITERATIONS", "5"))
-    worker_api_key: str = os.getenv("WORKER_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-    worker_api_base: str = os.getenv("WORKER_API_BASE", os.getenv("OPENAI_API_BASE", ""))
-    critic_api_key: str = os.getenv("CRITIC_API_KEY", "")
-    critic_api_base: str = os.getenv("CRITIC_API_BASE", "")
-    output_dir: str = os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research/agent-results"))
-    enable_evaluator: bool = os.getenv("ENABLE_EVALUATOR", "true").lower() not in ("false", "0", "no", "")
-    fallback_api_key: str = os.getenv("FALLBACK_API_KEY", "")
-    fallback_api_base: str = os.getenv("FALLBACK_API_BASE", "")
-    fallback_model: str = os.getenv("FALLBACK_MODEL", "")
+    worker_model: str = field(default_factory=lambda: os.getenv("WORKER_MODEL", "deepseek-v4-flash"))
+    critic_model: str = field(default_factory=lambda: os.getenv("CRITIC_MODEL", "deepseek-v4-pro"))
+    max_search_iterations: int = field(default_factory=lambda: int(os.getenv("MAX_SEARCH_ITERATIONS", "5")))
+    worker_api_key: str = field(default_factory=lambda: os.getenv("WORKER_API_KEY", os.getenv("OPENAI_API_KEY", "")))
+    worker_api_base: str = field(default_factory=lambda: os.getenv("WORKER_API_BASE", os.getenv("OPENAI_API_BASE", "")))
+    critic_api_key: str = field(default_factory=lambda: os.getenv("CRITIC_API_KEY", ""))
+    critic_api_base: str = field(default_factory=lambda: os.getenv("CRITIC_API_BASE", ""))
+    output_dir: str = field(default_factory=lambda: os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research/agent-results")))
+    enable_evaluator: bool = field(default_factory=lambda: os.getenv("ENABLE_EVALUATOR", "true").lower() not in ("false", "0", "no", ""))
+    fallback_api_key: str = field(default_factory=lambda: os.getenv("FALLBACK_API_KEY", ""))
+    fallback_api_base: str = field(default_factory=lambda: os.getenv("FALLBACK_API_BASE", ""))
+    fallback_model: str = field(default_factory=lambda: os.getenv("FALLBACK_MODEL", ""))
 
     def validate(self) -> list[str]:
         """Validate configuration and return list of issues.

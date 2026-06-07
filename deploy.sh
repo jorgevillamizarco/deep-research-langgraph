@@ -24,11 +24,9 @@ searxng_alive() {
 do_start() {
   echo "=== Deploying Deep Research Stack ==="
 
-  # Build image if needed
-  if ! docker image inspect "$AGENT_IMAGE" > /dev/null 2>&1; then
-    info "Building agent image..."
-    docker build -t "$AGENT_IMAGE" .
-  fi
+  # Build current image from working tree
+  info "Building agent image..."
+  docker build -t "$AGENT_IMAGE" .
 
   # Check env file
   if [ ! -f "$ENV_FILE" ]; then

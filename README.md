@@ -1,97 +1,162 @@
 # Deep Research Agent (LangGraph)
 
-A production-ready deep research agent built with **LangGraph** that performs multi-phase research: collaborative planning, parallel web research, iterative refinement with critique loop, and final report synthesis with structured citations.
-
-Replicates the architecture of Google's [ADK deep-search sample](https://github.com/google/adk-samples/tree/main/python/agents/deep-search) using LangGraph's StateGraph, subgraphs, interrupts, and conditional routing.
+A LangGraph-based deep research agent with:
+- two-phase execution (`[RESEARCH]` → `[DELIVERABLE]`)
+- parallel fan-out via Send API
+- iterative refinement with evaluator + enhancer loop
+- MCP server + web dashboard
+- cited markdown/PDF output
+- checkpoint persistence across deploys
 
 ## Architecture
 
 ```
-planner (plan_generator + section_planner + interrupt)
+planner
+  │
+  ├─► parallel_researcher(goal 1)
+  ├─► parallel_researcher(goal 2)
+  └─► parallel_researcher(goal N)
   │
   ▼
-researcher (section_researcher: two-phase execution [RESEARCH] → [DELIVERABLE])
+merge_findings
   │
   ▼
-[refinement_subgraph]  ◄──────────────────────┐
-  │  evaluator (research_evaluator)            │
-  │    ├─ pass ──► exit subgraph               │
-  │    └─ fail ──► enhancer ───────────────────┘ (loop, iteration++)
+refinement_subgraph
+  deliverable → evaluator → enhancer → deliverable
   │
   ▼
-composer (report_composer + citation replacement)
+composer
 ```
 
 ## Quick Start
 
+### Local
+
 ```bash
-# Install
 cd deep-research-langgraph
 python3 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/python -m pip install -e . pytest
 
-# Run research
-.venv/bin/python -m app.cli "Your research topic"
+export WORKER_API_KEY=...
+export WORKER_API_BASE=https://api.deepseek.com
+# optional but recommended
+export CRITIC_MODEL=deepseek-v4-pro
 
-# With auto-approve (skip plan interrupt):
+.venv/bin/python -m app.cli --help
 .venv/bin/python -m app.cli --auto "Your research topic"
+```
+
+### Docker
+
+```bash
+cp .docker.env.template .docker.env
+# fill in API keys
+
+./deploy.sh start  # rebuilds the current image and restarts the stack
+curl -s http://localhost:8100/health
+curl -s http://localhost:8100/ready
+```
+
+### Docker Compose
+
+```bash
+cp .docker.env.template .docker.env
+# fill in API keys
+
+docker-compose up -d
+curl -s http://localhost:8100/health
+curl -s http://localhost:8100/ready
 ```
 
 ## Configuration
 
-Set via environment variables (or `.env` file):
+This project does **not** auto-load a generic `.env` file for local CLI runs.
+Use exported environment variables locally, or `.docker.env` / `.docker.env.template` for Docker.
 
-|| Variable | Default | Description |
-|----------|---------|-------------|
-| `WORKER_MODEL` | `deepseek-v4-flash` | Model for research/composition tasks |
-| `CRITIC_MODEL` | `deepseek-v4-pro` | Model for evaluation (should be stronger) |
-| `WORKER_API_KEY` | `OPENAI_API_KEY` | API key for worker model |
-| `WORKER_API_BASE` | `OPENAI_API_BASE` | API base URL for worker |
-| `CRITIC_API_KEY` | falls back to WORKER | API key for critic model |
-| `CRITIC_API_BASE` | falls back to WORKER | API base for critic model |
-| `SEARXNG_URL` | `http://deep-research-searxng:8080` | Internal SearXNG endpoint |
-| `MAX_SEARCH_ITERATIONS` | `3` | Max critique loop iterations |
-| `RESEARCH_OUTPUT_DIR` | `/data` | Report output directory (Docker mount) |
+| Variable | Default | Description |
+|---|---|---|
+| `WORKER_MODEL` | `deepseek-v4-flash` | Research/composition model |
+| `CRITIC_MODEL` | `deepseek-v4-pro` | Evaluation model |
+| `WORKER_API_KEY` | `OPENAI_API_KEY` fallback | API key for worker model |
+| `WORKER_API_BASE` | `OPENAI_API_BASE` fallback | API base URL |
+| `CRITIC_API_KEY` | falls back to worker | Critic API key |
+| `CRITIC_API_BASE` | falls back to worker | Critic API base |
+| `SEARXNG_URL` | `http://deep-research-searxng:8080` | Search backend URL |
+| `MAX_SEARCH_ITERATIONS` | `3` | Max critique loops |
+| `RESEARCH_OUTPUT_DIR` | `/data` in Docker | Report output directory |
 | `CHECKPOINT_DB_PATH` | `checkpoints.db` | SQLite checkpoint DB path |
-| `TAVILY_API_KEY` | (none → SearXNG → DuckDuckGo) | Web search API key |
+| `DASHBOARD_PUBLIC` | unset | Set to `1`/`true` to expose dashboard/task/download routes beyond local/private-network clients |
+| `TAVILY_API_KEY` | optional | Enables Tavily as primary search backend |
+| `FALLBACK_API_KEY` | optional | Fallback LLM provider key |
+| `FALLBACK_API_BASE` | optional | Fallback LLM provider base |
+
+## Runtime Endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `/` | Dashboard (local/private-network only by default; set `DASHBOARD_PUBLIC=1` to expose remotely) |
+| `/health` | Cheap liveness check |
+| `/ready` | Deep readiness check: config, writable output/checkpoint paths, authenticated LLM endpoint reachability, active search backend probe |
+| `/mcp` | MCP endpoint (GET SSE, POST JSON-RPC) |
+| `/stream/{task_id}` | SSE progress stream (local/private-network only by default) |
+| `/tasks` | Dashboard/API task list (sanitized filenames, no absolute paths; local/private-network only by default) |
+| `/download/{filename}` | Download `.md` / `.pdf` reports (local/private-network only by default) |
+
+## Search Behavior
+
+Backend priority:
+1. Tavily
+2. SearXNG
+3. DDGS fallback
+
+Language handling:
+- planner annotates jurisdiction-specific goals with `(search in LANGUAGE; ...)`
+- researcher passes the language hint to search
+- SearXNG uses the requested language instead of forcing English
+- Tavily routes non-English searches through SearXNG when available
+- DDGS fallback maps language hints to locale-specific regions (for example `es-es`, `de-de`)
+- query-language inference still falls back to English when no hint exists
 
 ## Project Structure
 
-```
+```text
 deep-research-langgraph/
 ├── app/
-│   ├── agent.py          # StateGraph + subgraph + compilation
-│   ├── state.py          # ResearchState TypedDict + Pydantic models
-│   ├── config.py         # ResearchConfig dataclass
-│   ├── cli.py            # CLI entry point
+│   ├── agent.py
+│   ├── cli.py
+│   ├── config.py
+│   ├── mcp_server.py
+│   ├── state.py
+│   ├── tokens.py
 │   ├── nodes/
-│   │   ├── planner.py    # Plan generation + section outline
-│   │   ├── researcher.py # Two-phase web research
-│   │   ├── evaluator.py  # Quality critique (Feedback schema)
-│   │   ├── enhancer.py   # Follow-up search execution
-│   │   └── composer.py   # Report synthesis + citations
 │   └── tools/
-│       ├── search.py     # Tavily/DuckDuckGo wrapper
-│       └── citations.py  # Source extraction + tag replacement
 ├── tests/
-│   └── test_agent.py     # Unit tests
+│   ├── test_agent.py
+│   ├── test_integration.py
+│   └── test_mcp_server.py
+├── .github/workflows/ci.yml
+├── docker-compose.yml
+├── deploy.sh
 └── pyproject.toml
 ```
-
-## Key Design Decisions
-
-- **StateGraph** over Functional API — needed for conditional routing (pass/fail from evaluator)
-- **Subgraph for refinement loop** — isolates critic→enhancer logic, mirrors ADK's LoopAgent
-- **JSON prompting for evaluator** instead of `with_structured_output` — broader model compatibility
-- **Two-pass plan approval** (outside graph) instead of interrupt() — avoids double-entry bug, saves one LLM call
-- **State reducers** — `operator.or_` merges sources across refinement iterations
 
 ## Development
 
 ```bash
-# Tests
-.venv/bin/python -m pytest tests/ -v
+# test suite
+.venv/bin/python -m pytest tests/ -q
 
-# Smoke test (requires API key)
-.venv/bin/python smoke_test.py
+# CLI help should work without API config
+.venv/bin/python -m app.cli --help
+
+# local health checks after starting server
+curl -s http://localhost:8100/health
+curl -s http://localhost:8100/ready
+
+# MCP initialize smoke test
+curl -s -X POST http://localhost:8100/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 ```
+
+Current test count: **45 passing tests**.

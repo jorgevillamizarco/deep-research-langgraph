@@ -69,11 +69,14 @@ def _get_report_dir() -> Path:
 
     Order: RESEARCH_OUTPUT_DIR env → ~/research → current directory.
     """
-    candidates = [
-        Path(os.getenv("RESEARCH_OUTPUT_DIR", "")),
+    env_report_dir = os.getenv("RESEARCH_OUTPUT_DIR")
+    candidates = []
+    if env_report_dir:
+        candidates.append(Path(env_report_dir))
+    candidates.extend([
         Path.home() / "research",
         Path.cwd(),
-    ]
+    ])
     for candidate in candidates:
         if not candidate:
             continue
@@ -145,6 +148,10 @@ and any question answerable with a single search.""",
                         "type": "integer",
                         "description": "Number of results to return (default: 5, max: 15).",
                         "default": 5,
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Optional language hint (e.g. Spanish, German, es, de).",
                     },
                 },
                 "required": ["query"],
@@ -248,52 +255,34 @@ async def handle_call_tool(
 async def _handle_search(
     arguments: dict[str, Any] | None
 ) -> list[types.TextContent | types.EmbeddedResource]:
-    """Quick web search via SearXNG."""
+    """Quick web search using the configured backend chain."""
+    from app.tools.search import format_search_results, get_search_tool
+
     query = (arguments or {}).get("query", "")
     max_results = min(int((arguments or {}).get("max_results", 5)), 15)
+    language = (arguments or {}).get("language")
 
     if not query:
         return [types.TextContent(type="text", text="Error: 'query' is required.")]
 
-    import httpx
-
-    searxng_url = os.getenv("SEARXNG_URL", "http://localhost:8080")
-
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                f"{searxng_url.rstrip('/')}/search",
-                params={"q": query, "format": "json", "language": "en"},
-                headers={"User-Agent": "DeepResearch-MCP/1.0"},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
+        search_tool = get_search_tool()
+        results = await asyncio.to_thread(
+            search_tool.invoke,
+            {"query": query, "max_results": max_results, "language": language},
+        )
     except Exception as e:
         return [
             types.TextContent(
                 type="text",
-                text=f"Search failed: {e}\n\nTry using DuckDuckGo directly or check if SearXNG is running on {searxng_url}.",
+                text=f"Search failed: {e}\n\nCheck your configured search backend and network connectivity.",
             )
         ]
-
-    results = data.get("results", [])[:max_results]
 
     if not results:
         return [types.TextContent(type="text", text=f"No results found for: {query}")]
 
-    lines = [f"# Search Results: {query}", ""]
-    for i, r in enumerate(results, 1):
-        title = r.get("title", "Untitled")
-        url = r.get("url", "")
-        snippet = r.get("content", r.get("snippet", ""))
-        engine = r.get("engine", "")
-        lines.append(f"## {i}. [{title}]({url})")
-        if snippet:
-            lines.append(f"   {snippet[:500]}")
-        lines.append("")
-
-    return [types.TextContent(type="text", text="\n".join(lines))]
+    return [types.TextContent(type="text", text=format_search_results(query, results))]
 
 
 def _push_stream_event(task_id: str, event: dict[str, Any]) -> None:
@@ -388,11 +377,14 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         if not report:
             err_text = "No report was generated. Check logs for details."
             _update(task_id, status="failed", error=err_text, progress=1.0, stage="error")
+            failed_task = _research_tasks.get(task_id)
+            if failed_task:
+                failed_task["completed_at"] = time.time()
+                _persist_task(failed_task)
             return
 
         # Save report
-        report_dir = Path(os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research")))
-        report_dir.mkdir(parents=True, exist_ok=True)
+        report_dir = _get_report_dir()
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         safe_topic = topic.replace(" ", "_").replace("/", "_")[:40]
         filename = report_dir / f"report_{safe_topic}_{timestamp}_{task_id[-12:]}.md"
@@ -434,6 +426,11 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
     except Exception as e:
         logger.exception("Background research failed for task %s", task_id)
         _update(task_id, status="failed", error=str(e), progress=1.0, stage="error")
+        failed_task = _research_tasks.get(task_id)
+        if failed_task:
+            import time
+            failed_task["completed_at"] = time.time()
+            _persist_task(failed_task)
 
 
 async def _handle_deep_research(
@@ -591,29 +588,290 @@ async def _run_stdio():
         )
 
 
-async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
-    """Run with SSE/HTTP transport (for Docker deployment)."""
-    global _main_event_loop
-    _main_event_loop = asyncio.get_running_loop()
+def _load_persisted_task_meta(meta_file: Path) -> dict[str, Any] | None:
+    """Load task metadata from a persisted task JSON file."""
+    import json as _json
 
-    from mcp.server.sse import SseServerTransport
+    try:
+        with open(meta_file) as f:
+            return _json.load(f)
+    except Exception:
+        return None
+
+
+
+def _list_persisted_tasks(limit: int = 100) -> list[dict[str, Any]]:
+    """Return persisted task metadata sorted newest-first."""
+    report_dir = _get_report_dir()
+    tasks: list[dict[str, Any]] = []
+    for meta_file in sorted(
+        report_dir.glob('task_*.json'),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ):
+        task = _load_persisted_task_meta(meta_file)
+        if task:
+            tasks.append(task)
+        if len(tasks) >= limit:
+            break
+    return tasks
+
+
+
+def _hydrate_task_cache_from_disk(limit: int = 100) -> None:
+    """Merge persisted terminal tasks into the in-memory task cache."""
+    for task in _list_persisted_tasks(limit=limit):
+        task_id = task.get('task_id')
+        if task_id and task_id not in _research_tasks:
+            _research_tasks[task_id] = task
+
+
+
+def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
+    """Project internal task state into the dashboard/API response shape."""
+    stage_raw = task.get('stage', '')
+    created_at = task.get('created_at', task.get('completed_at', now))
+    report_path = task.get('report_path', '')
+    pdf_path = task.get('pdf_path')
+    return {
+        'task_id': task.get('task_id', ''),
+        'topic': task.get('topic', ''),
+        'status': task.get('status', 'unknown'),
+        'progress': task.get('progress', 0),
+        'stage': STAGE_LABELS.get(stage_raw, stage_raw),
+        'elapsed': int(max(now - created_at, 0)),
+        'has_report': bool(report_path),
+        'report_filename': Path(report_path).name if report_path else '',
+        'has_pdf': bool(pdf_path),
+        'pdf_filename': Path(pdf_path).name if pdf_path else '',
+        'char_count': task.get('char_count', 0),
+    }
+
+
+
+def _list_all_tasks(limit: int = 100) -> list[dict[str, Any]]:
+    """Return merged in-memory + persisted tasks for the dashboard."""
+    import time as _time_module
+
+    tasks_by_id: dict[str, dict[str, Any]] = {
+        task['task_id']: task for task in _list_persisted_tasks(limit=limit)
+        if task.get('task_id')
+    }
+    for task_id, task in _research_tasks.items():
+        tasks_by_id[task_id] = {**tasks_by_id.get(task_id, {}), **task}
+
+    now = _time_module.time()
+    ordered = sorted(
+        tasks_by_id.values(),
+        key=lambda t: t.get('created_at', t.get('completed_at', 0)),
+        reverse=True,
+    )
+    return [_task_api_view(task, now) for task in ordered[:limit]]
+
+
+
+def _probe_report_dir() -> dict[str, Any]:
+    """Verify that the report directory is writable."""
+    try:
+        report_dir = _get_report_dir().resolve()
+        return {'ok': True, 'detail': str(report_dir)}
+    except Exception as e:
+        return {'ok': False, 'detail': str(e)}
+
+
+
+def _probe_checkpoint_db() -> dict[str, Any]:
+    """Verify that the checkpoint DB path is writable/openable."""
+    import sqlite3
+
+    try:
+        db_path = Path(os.getenv('CHECKPOINT_DB_PATH', 'checkpoints.db')).expanduser()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.execute('PRAGMA schema_version;')
+        conn.close()
+        return {'ok': True, 'detail': str(db_path)}
+    except Exception as e:
+        return {'ok': False, 'detail': str(e)}
+
+
+
+def _probe_llm_api() -> dict[str, Any]:
+    """Verify that the configured LLM endpoint is reachable."""
+    import httpx
+    from app.config import ResearchConfig
+
+    runtime_config = ResearchConfig()
+    if not runtime_config.worker_api_key or not runtime_config.worker_api_base:
+        return {'ok': False, 'detail': 'WORKER_API_KEY / WORKER_API_BASE missing'}
+
+    endpoint = runtime_config.worker_api_base.rstrip('/') + '/models'
+    headers = {'Authorization': f'Bearer {runtime_config.worker_api_key}'}
+    try:
+        with httpx.Client(timeout=3.0, follow_redirects=True) as client:
+            resp = client.get(endpoint, headers=headers)
+        if 200 <= resp.status_code < 300:
+            return {'ok': True, 'detail': f'{endpoint} ({resp.status_code})'}
+        return {'ok': False, 'detail': f'{endpoint} ({resp.status_code})'}
+    except Exception as e:
+        return {'ok': False, 'detail': str(e)}
+
+
+
+def _probe_search_backend() -> dict[str, Any]:
+    """Verify that the active search path can execute a real low-cost query."""
+    from app.tools.search import _DEFAULT_SEARXNG_URL
+
+    if os.getenv('TAVILY_API_KEY'):
+        try:
+            from langchain_community.tools.tavily_search import TavilySearchResults
+
+            tool = TavilySearchResults(max_results=1)
+            tool.invoke({'query': 'health check'})
+            return {'ok': True, 'detail': 'tavily'}
+        except Exception as e:
+            return {'ok': False, 'detail': f'tavily: {e}'}
+
+    searxng_url = os.getenv('SEARXNG_URL', _DEFAULT_SEARXNG_URL)
+    try:
+        import httpx
+
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{searxng_url.rstrip('/')}/search?q=health&format=json")
+        if resp.status_code == 200:
+            return {'ok': True, 'detail': searxng_url}
+        return {'ok': False, 'detail': f'{searxng_url} ({resp.status_code})'}
+    except Exception:
+        pass
+
+    try:
+        from ddgs import DDGS
+
+        with DDGS() as ddgs:
+            list(ddgs.text('health check', max_results=1, region='us-en'))
+        return {'ok': True, 'detail': 'ddgs fallback'}
+    except Exception as e:
+        return {'ok': False, 'detail': f'ddgs: {e}'}
+
+
+
+def _build_readiness_payload() -> tuple[dict[str, Any], int]:
+    """Compute readiness status and HTTP code."""
+    from app.config import ResearchConfig
+
+    runtime_config = ResearchConfig()
+    issues = runtime_config.validate()
+    critical_issues = [
+        issue for issue in issues
+        if 'WORKER_API_KEY' in issue or 'WORKER_API_BASE' in issue
+    ]
+    checks = {
+        'config': {
+            'ok': not critical_issues,
+            'detail': 'configured' if not critical_issues else '; '.join(critical_issues),
+        },
+        'report_dir': _probe_report_dir(),
+        'checkpoint_db': _probe_checkpoint_db(),
+        'llm_api': _probe_llm_api(),
+        'search_backend': _probe_search_backend(),
+    }
+    ok = all(check['ok'] for check in checks.values())
+    payload = {'status': 'ok' if ok else 'degraded', 'server': 'deep-research', 'checks': checks}
+    return payload, 200 if ok else 503
+
+
+
+def _mcp_tools_payload() -> list[dict[str, Any]]:
+    """Shared MCP tool metadata for POST /mcp tools/list."""
+    return [
+        {
+            'name': 'search',
+            'description': 'Quick web search via SearXNG (Google/Bing/DuckDuckGo aggregated). Returns title, URL, and snippet.',
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'query': {'type': 'string', 'description': 'The search query'},
+                    'max_results': {'type': 'integer', 'description': 'Max results (default: 5, max: 15)', 'default': 5},
+                    'language': {'type': 'string', 'description': 'Optional language hint (e.g. Spanish, German, es, de).'},
+                },
+                'required': ['query'],
+            },
+        },
+        {
+            'name': 'deep_research',
+            'description': 'Run a deep, multi-phase research investigation on any topic. Returns a task_id immediately — poll with research_status(task_id) for results.',
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'topic': {'type': 'string', 'description': 'The research topic'},
+                    'max_iterations': {'type': 'integer', 'description': 'Max critique-refinement loops (default: 2)', 'default': 2},
+                    'depth': {'type': 'string', 'description': 'Report depth: brief or standard', 'default': 'standard'},
+                    'pdf': {'type': 'boolean', 'description': 'Also generate a PDF version of the report', 'default': False},
+                },
+                'required': ['topic'],
+            },
+        },
+        {
+            'name': 'research_status',
+            'description': "Check the status of a deep_research task. Returns 'running'/'completed'/'failed' with progress, report, or error.",
+            'inputSchema': {
+                'type': 'object',
+                'properties': {
+                    'task_id': {'type': 'string', 'description': 'Task ID from deep_research'},
+                },
+                'required': ['task_id'],
+            },
+        },
+    ]
+
+
+
+def create_http_app(sse=None):
+    """Create the Starlette HTTP app for MCP, dashboard, and health endpoints."""
     from starlette.applications import Starlette
-    from starlette.responses import Response, JSONResponse
+    from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
     from starlette.routing import Mount, Route
-    import uvicorn
 
-    sse = SseServerTransport("/messages/")
+    def _dashboard_access_allowed(request) -> bool:
+        import ipaddress
+
+        def _is_local_network_ip(value: str) -> bool:
+            try:
+                ip = ipaddress.ip_address(value)
+            except ValueError:
+                return False
+            if ip.is_loopback:
+                return True
+            if ip.version == 4:
+                return any(ip in ipaddress.ip_network(net) for net in (
+                    '10.0.0.0/8',
+                    '172.16.0.0/12',
+                    '192.168.0.0/16',
+                ))
+            return ip in ipaddress.ip_network('fc00::/7')
+
+        if os.getenv('DASHBOARD_PUBLIC', '').lower() in {'1', 'true', 'yes'}:
+            return True
+        client_host = getattr(getattr(request, 'client', None), 'host', '')
+        if client_host in {'localhost', 'testclient'}:
+            return True
+        return _is_local_network_ip(client_host)
+
+    def _dashboard_forbidden():
+        return JSONResponse({'error': 'Forbidden'}, status_code=403)
+
+    _hydrate_task_cache_from_disk(limit=100)
 
     async def handle_sse(request):
-        async with sse.connect_sse(
-            request.scope, request.receive, request._send
-        ) as streams:
+        if sse is None:
+            return JSONResponse({'error': 'SSE transport unavailable'}, status_code=503)
+        async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
             await server.run(
                 streams[0],
                 streams[1],
                 InitializationOptions(
-                    server_name="deep-research",
-                    server_version="0.1.0",
+                    server_name='deep-research',
+                    server_version='0.1.0',
                     capabilities=server.get_capabilities(
                         notification_options=NotificationOptions(),
                         experimental_capabilities={},
@@ -623,227 +881,135 @@ async def _run_sse(host: str = "0.0.0.0", port: int = 8100):
         return Response()
 
     async def health_check(request):
-        return JSONResponse({"status": "ok", "server": "deep-research"})
+        return JSONResponse({'status': 'ok', 'server': 'deep-research'})
+
+    async def ready_check(request):
+        payload, status_code = _build_readiness_payload()
+        return JSONResponse(payload, status_code=status_code)
 
     async def mcp_probe(request):
-        """Handle MCP JSON-RPC over POST (Hermes' default transport).
-
-        Hermes probes by sending an initialize request via POST.
-        If the server responds correctly, Hermes continues with tools/list
-        over POST instead of establishing an SSE stream.
-        """
         try:
             body = await request.json()
         except Exception:
-            return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+            return JSONResponse({'jsonrpc': '2.0', 'id': None, 'error': {'code': -32700, 'message': 'Parse error'}})
 
-        method = body.get("method", "")
-        request_id = body.get("id", 0)
+        method = body.get('method', '')
+        request_id = body.get('id', 0)
 
-        if method == "initialize":
+        if method == 'initialize':
             return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "serverInfo": {"name": "deep-research", "version": "0.1.0"},
-                    "capabilities": {"tools": {}, "resources": {}},
+                'jsonrpc': '2.0',
+                'id': request_id,
+                'result': {
+                    'protocolVersion': '2024-11-05',
+                    'serverInfo': {'name': 'deep-research', 'version': '0.1.0'},
+                    'capabilities': {'tools': {}, 'resources': {}},
                 },
             })
-        elif method == "tools/list":
-            # Return actual tools (ADK-aligned)
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "tools": [
-                        {
-                            "name": "search",
-                            "description": "Quick web search via SearXNG (Google/Bing/DuckDuckGo aggregated). Returns title, URL, and snippet.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {"type": "string", "description": "The search query"},
-                                    "max_results": {"type": "integer", "description": "Max results (default: 5, max: 15)", "default": 5},
-                                },
-                                "required": ["query"],
-                            },
-                        },
-                        {
-                            "name": "deep_research",
-                            "description": "Run a deep, multi-phase research investigation on any topic. Returns a task_id immediately — poll with research_status(task_id) for results.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "topic": {"type": "string", "description": "The research topic"},
-                                    "max_iterations": {"type": "integer", "description": "Max critique-refinement loops (default: 2)", "default": 2},
-                                    "depth": {"type": "string", "description": "Report depth: brief or standard", "default": "standard"},
-                                },
-                                "required": ["topic"],
-                            },
-                        },
-                        {
-                            "name": "research_status",
-                            "description": "Check the status of a deep_research task. Returns 'running'/'completed'/'failed' with progress, report, or error.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "task_id": {"type": "string", "description": "Task ID from deep_research"},
-                                },
-                                "required": ["task_id"],
-                            },
-                        },
-                    ]
-                },
-            })
-        elif method == "tools/call":
-            # Execute tool via POST (same handler as SSE)
-            tool_name = body.get("params", {}).get("name", "")
-            tool_args = body.get("params", {}).get("arguments", {})
+        if method == 'tools/list':
+            return JSONResponse({'jsonrpc': '2.0', 'id': request_id, 'result': {'tools': _mcp_tools_payload()}})
+        if method == 'tools/call':
+            tool_name = body.get('params', {}).get('name', '')
+            tool_args = body.get('params', {}).get('arguments', {})
             try:
                 result = await handle_call_tool(tool_name, tool_args)
-                # Extract text from MCP types for JSON response
                 content = []
                 for item in result:
                     if isinstance(item, types.TextContent):
-                        content.append({"type": "text", "text": item.text})
+                        content.append({'type': 'text', 'text': item.text})
                     elif isinstance(item, types.EmbeddedResource):
-                        content.append({"type": "resource", "resource": {
-                            "uri": str(item.resource.uri) if hasattr(item.resource, 'uri') else "",
-                            "mimeType": item.resource.mimeType if hasattr(item.resource, 'mimeType') else "text/markdown",
+                        content.append({'type': 'resource', 'resource': {
+                            'uri': str(item.resource.uri) if hasattr(item.resource, 'uri') else '',
+                            'mimeType': item.resource.mimeType if hasattr(item.resource, 'mimeType') else 'text/markdown',
                         }})
-                return JSONResponse({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {"content": content, "isError": False},
-                })
+                return JSONResponse({'jsonrpc': '2.0', 'id': request_id, 'result': {'content': content, 'isError': False}})
             except Exception as e:
-                logger.exception("tools/call failed via POST")
+                logger.exception('tools/call failed via POST')
                 return JSONResponse({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "content": [{"type": "text", "text": f"Tool execution failed: {e}"}],
-                        "isError": True,
-                    },
+                    'jsonrpc': '2.0',
+                    'id': request_id,
+                    'result': {'content': [{'type': 'text', 'text': f'Tool execution failed: {e}'}], 'isError': True},
                 })
-        elif method == "notifications/initialized":
-            return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": {}})
-        else:
-            return JSONResponse({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            })
+        if method == 'notifications/initialized':
+            return JSONResponse({'jsonrpc': '2.0', 'id': request_id, 'result': {}})
+        return JSONResponse({'jsonrpc': '2.0', 'id': request_id, 'error': {'code': -32601, 'message': f'Method not found: {method}'}})
 
     async def handle_stream(request):
-        """SSE endpoint for streaming real-time research progress.
+        if not _dashboard_access_allowed(request):
+            return _dashboard_forbidden()
 
-        Connect to /stream/{task_id} after calling deep_research to receive
-        live progress events. Events include:
-
-        - event: started — research has begun
-        - event: update — progress/stage changed (e.g. "parallel_researcher", "composer")
-        - event: completed — research done, report_path included
-        - event: failed — error occurred
-        - event: heartbeat — sent every 5s to keep connection alive
-
-        Returns 404 if task_id not found.
-        """
-        task_id = request.path_params.get("task_id", "")
+        task_id = request.path_params.get('task_id', '')
         if not task_id:
-            return JSONResponse({"error": "task_id required"}, status_code=400)
+            return JSONResponse({'error': 'task_id required'}, status_code=400)
 
-        # Check task exists
         task = _research_tasks.get(task_id)
         if not task:
             task = await asyncio.to_thread(_load_persisted_task, task_id)
         if not task:
-            return JSONResponse({"error": "Task not found"}, status_code=404)
+            return JSONResponse({'error': 'Task not found'}, status_code=404)
 
-        # Create a queue for this stream
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         async with _stream_lock:
             _stream_queues[task_id] = q
 
-        # Capture task snapshot for the generator
-        _task_snapshot = dict(task)  # type: ignore[arg-type]
+        task_snapshot = dict(task)
 
         async def event_generator():
             import json as _json
-            # Send initial state
-            yield f"event: started\ndata: {_json.dumps({'task_id': task_id, 'topic': _task_snapshot.get('topic', ''), 'status': _task_snapshot.get('status', 'running'), 'progress': _task_snapshot.get('progress', 0)})}\n\n".encode("utf-8")
 
-            last_progress = _task_snapshot.get("progress", 0)
+            yield f"event: started\ndata: {_json.dumps({'task_id': task_id, 'topic': task_snapshot.get('topic', ''), 'status': task_snapshot.get('status', 'running'), 'progress': task_snapshot.get('progress', 0)})}\n\n".encode('utf-8')
+
+            if task_snapshot.get('status') in ('completed', 'failed'):
+                yield f"event: {task_snapshot['status']}\ndata: {_json.dumps({'task_id': task_id, 'status': task_snapshot['status'], 'progress': task_snapshot.get('progress', 1.0)})}\n\n".encode('utf-8')
+                async with _stream_lock:
+                    _stream_queues.pop(task_id, None)
+                return
+
+            last_progress = task_snapshot.get('progress', 0)
             completed = False
-
             while not completed:
                 try:
-                    # Wait for next event with timeout
                     event = await asyncio.wait_for(q.get(), timeout=5.0)
-                    yield f"event: {event.get('event', 'update')}\ndata: {_json.dumps(event)}\n\n".encode("utf-8")
-
-                    if event.get("event") in ("completed", "failed"):
+                    yield f"event: {event.get('event', 'update')}\ndata: {_json.dumps(event)}\n\n".encode('utf-8')
+                    if event.get('event') in ('completed', 'failed'):
                         completed = True
                         break
                 except asyncio.TimeoutError:
-                    # Heartbeat to keep connection alive
-                    # Check if task was completed in another way
                     current_task = _research_tasks.get(task_id)
                     if current_task:
-                        current_progress = current_task.get("progress", last_progress)
+                        current_progress = current_task.get('progress', last_progress)
                         if current_progress != last_progress:
                             last_progress = current_progress
-                            yield f"event: heartbeat\ndata: {_json.dumps({'task_id': task_id, 'progress': current_progress, 'status': current_task.get('status', 'running')})}\n\n".encode("utf-8")
-                        if current_task.get("status") in ("completed", "failed"):
-                            yield f"event: {current_task['status']}\ndata: {_json.dumps({'task_id': task_id, 'status': current_task['status'], 'progress': 1.0})}\n\n".encode("utf-8")
+                            yield f"event: heartbeat\ndata: {_json.dumps({'task_id': task_id, 'progress': current_progress, 'status': current_task.get('status', 'running')})}\n\n".encode('utf-8')
+                        if current_task.get('status') in ('completed', 'failed'):
+                            yield f"event: {current_task['status']}\ndata: {_json.dumps({'task_id': task_id, 'status': current_task['status'], 'progress': 1.0})}\n\n".encode('utf-8')
                             completed = True
                     else:
-                        # Task gone — send completion and close
-                        yield f"event: completed\ndata: {_json.dumps({'task_id': task_id, 'status': 'completed', 'progress': 1.0})}\n\n".encode("utf-8")
+                        yield f"event: completed\ndata: {_json.dumps({'task_id': task_id, 'status': 'completed', 'progress': 1.0})}\n\n".encode('utf-8')
                         completed = True
 
-            # Cleanup queue
             async with _stream_lock:
                 _stream_queues.pop(task_id, None)
 
-        from starlette.responses import StreamingResponse
         return StreamingResponse(
             event_generator(),
-            media_type="text/event-stream",
+            media_type='text/event-stream',
             headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",  # Disable nginx buffering
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
             },
         )
 
     async def tasks_api(request):
-        """Return JSON array of all tasks with progress details."""
-        import time as _time_module
-        tasks = []
-        now = _time_module.time()
-        async with _research_lock:
-            for tid, t in sorted(_research_tasks.items(),
-                                 key=lambda x: x[1].get("created_at", 0),
-                                 reverse=True):
-                stage_raw = t.get("stage", "")
-                tasks.append({
-                    "task_id": tid,
-                    "topic": t.get("topic", ""),
-                    "status": t.get("status", "unknown"),
-                    "progress": t.get("progress", 0),
-                    "stage": STAGE_LABELS.get(stage_raw, stage_raw),
-                    "elapsed": int(now - t.get("created_at", now)),
-                    "report_path": t.get("report_path", ""),
-                    "pdf_path": t.get("pdf_path"),
-                    "char_count": t.get("char_count", 0),
-                })
-        return JSONResponse(tasks)
+        if not _dashboard_access_allowed(request):
+            return _dashboard_forbidden()
+        return JSONResponse(_list_all_tasks())
 
     async def dashboard(request):
-        """Serve the monitoring dashboard HTML page."""
-        html = r"""<!DOCTYPE html>
+        if not _dashboard_access_allowed(request):
+            return _dashboard_forbidden()
+        html = '''<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -974,9 +1140,9 @@ async function refresh() {
           <div class="progress-bar">
             <div class="progress-fill ${t.status}" style="width:${Math.max(t.progress*100,1)}%"></div>
           </div>
-          ${t.status==='completed' && t.report_path
+          ${t.status==='completed' && t.has_report
             ? `<span class="report-link" onclick="viewReport('${t.task_id}')">View report (${(t.char_count/1000).toFixed(1)}K chars)</span>`+
-              (t.pdf_path ? ` <span class="report-link" style="color:#d29922" onclick="window.open('/download/${encodeURIComponent(t.pdf_path.split('/').pop())}')">⬇ PDF</span>` : '')
+              (t.has_pdf ? ` <span class="report-link" style="color:#d29922" onclick="window.open('/download/${encodeURIComponent(t.pdf_filename)}')">⬇ PDF</span>` : '')
             : ''}
         </div>
       `).join('');
@@ -1045,46 +1211,57 @@ refresh();
 setInterval(refresh, 5000);
 </script>
 </body>
-</html>"""
-        from starlette.responses import HTMLResponse
+</html>'''
         return HTMLResponse(html)
 
     async def download_file(request):
-        """Serve a report file for download from the output directory."""
+        if not _dashboard_access_allowed(request):
+            return _dashboard_forbidden()
+
         import urllib.parse
-        filename = request.path_params.get("filename", "")
+
+        filename = request.path_params.get('filename', '')
         filename = urllib.parse.unquote(filename)
         report_dir = _get_report_dir().resolve()
         filepath = (report_dir / filename).resolve()
-        # Prevent path traversal
         if not str(filepath).startswith(str(report_dir) + os.sep):
-            return JSONResponse({"error": "Forbidden"}, status_code=403)
+            return JSONResponse({'error': 'Forbidden'}, status_code=403)
         if not filepath.exists() or not filepath.is_file():
-            return JSONResponse({"error": "File not found"}, status_code=404)
-        # Only allow .md and .pdf files
-        if filepath.suffix not in (".md", ".pdf"):
-            return JSONResponse({"error": "File type not allowed"}, status_code=403)
-        from starlette.responses import FileResponse
+            return JSONResponse({'error': 'File not found'}, status_code=404)
+        if filepath.suffix not in ('.md', '.pdf'):
+            return JSONResponse({'error': 'File type not allowed'}, status_code=403)
         return FileResponse(filepath, filename=filename)
 
-    app = Starlette(
-        routes=[
-            Route("/", endpoint=dashboard, methods=["GET"]),
-            Route("/tasks", endpoint=tasks_api, methods=["GET"]),
-            Route("/health", endpoint=health_check),
-            Route("/mcp", endpoint=handle_sse, methods=["GET"]),
-            Route("/mcp", endpoint=mcp_probe, methods=["POST", "OPTIONS"]),
-            Route("/stream/{task_id}", endpoint=handle_stream, methods=["GET"]),
-            Route("/download/{filename:path}", endpoint=download_file, methods=["GET"]),
-            Mount("/messages/", app=sse.handle_post_message),
-        ]
-    )
+    routes = [
+        Route('/', endpoint=dashboard, methods=['GET']),
+        Route('/tasks', endpoint=tasks_api, methods=['GET']),
+        Route('/health', endpoint=health_check),
+        Route('/ready', endpoint=ready_check),
+        Route('/mcp', endpoint=handle_sse, methods=['GET']),
+        Route('/mcp', endpoint=mcp_probe, methods=['POST', 'OPTIONS']),
+        Route('/stream/{task_id}', endpoint=handle_stream, methods=['GET']),
+        Route('/download/{filename:path}', endpoint=download_file, methods=['GET']),
+    ]
+    if sse is not None:
+        routes.append(Mount('/messages/', app=sse.handle_post_message))
+    return Starlette(routes=routes)
 
-    logger.info("MCP SSE server listening on %s:%d", host, port)
-    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+
+async def _run_sse(host: str = '0.0.0.0', port: int = 8100):
+    """Run with SSE/HTTP transport (for Docker deployment)."""
+    global _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
+
+    from mcp.server.sse import SseServerTransport
+    import uvicorn
+
+    sse = SseServerTransport('/messages/')
+    app = create_http_app(sse=sse)
+
+    logger.info('MCP SSE server listening on %s:%d', host, port)
+    config = uvicorn.Config(app, host=host, port=port, log_level='info')
     server_uv = uvicorn.Server(config)
     await server_uv.serve()
-
 
 def main():
     parser = argparse.ArgumentParser(

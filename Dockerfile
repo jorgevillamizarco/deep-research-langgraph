@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     langchain-community>=0.3.0 \
     langchain-openai>=0.2.0 \
     pydantic>=2.0.0 \
-    duckduckgo_search>=8.0.0 \
+    ddgs>=9.0.0 \
     httpx>=0.28.0 \
     mcp>=1.0.0 \
     uvicorn>=0.48.0 \

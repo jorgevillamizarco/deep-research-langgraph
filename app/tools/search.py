@@ -12,19 +12,27 @@ import json
 import logging
 import os
 import re
+import unicodedata
 import urllib.parse
-import warnings
 from typing import Any
 
-import warnings
-
-warnings.filterwarnings("ignore", message=".*duckduckgo_search.*renamed.*")
-
-from duckduckgo_search import DDGS
+try:
+    from ddgs import DDGS
+except ImportError:  # pragma: no cover - compatibility for older local venvs
+    from duckduckgo_search import DDGS
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SEARXNG_URL = "http://localhost:8080"
+_DDGS_REGION_BY_LANG = {
+    "en": "us-en",
+    "es": "es-es",
+    "de": "de-de",
+    "fr": "fr-fr",
+    "it": "it-it",
+    "pt": "pt-pt",
+    "ca": "es-ca",
+}
 
 
 # ──────────────────────────────────────────────
@@ -32,11 +40,21 @@ _DEFAULT_SEARXNG_URL = "http://localhost:8080"
 # ──────────────────────────────────────────────
 
 
-def _duckduckgo_search(query: str, max_results: int = 5) -> list[dict[str, Any]]:
+def _duckduckgo_search(
+    query: str,
+    max_results: int = 5,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
     """Execute a web search via DuckDuckGo and return structured results."""
     try:
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
+            results = list(
+                ddgs.text(
+                    query,
+                    max_results=max_results,
+                    region=_resolve_ddgs_region(query, language),
+                )
+            )
             return [
                 {
                     "title": r.get("title", ""),
@@ -55,8 +73,15 @@ def _duckduckgo_search(query: str, max_results: int = 5) -> list[dict[str, Any]]
 # ──────────────────────────────────────────────
 
 
-def _tavily_search(query: str, max_results: int = 5) -> list[dict[str, Any]]:
+def _tavily_search(
+    query: str,
+    max_results: int = 5,
+    language: str | None = None,
+) -> list[dict[str, Any]]:
     """Execute a web search via Tavily."""
+    if _resolve_search_language(query, language) != "en" and _searxng_is_reachable():
+        logger.info("Routing non-English query to SearXNG for language-aware search: %r", query)
+        return _searxng_search(query, max_results=max_results, language=language)
     try:
         from langchain_community.tools.tavily_search import TavilySearchResults
 
@@ -81,7 +106,10 @@ def _tavily_search(query: str, max_results: int = 5) -> list[dict[str, Any]]:
 
 
 def _searxng_search(
-    query: str, max_results: int = 5, base_url: str | None = None
+    query: str,
+    max_results: int = 5,
+    base_url: str | None = None,
+    language: str | None = None,
 ) -> list[dict[str, Any]]:
     """Execute a web search via a local SearXNG instance.
 
@@ -99,7 +127,7 @@ def _searxng_search(
     params = {
         "q": query,
         "format": "json",
-        "language": "en",
+        "language": _resolve_search_language(query, language),
         "categories": "general,web",
         "pageno": 1,
     }
@@ -158,18 +186,9 @@ def get_search_tool() -> Any:
         logger.info("Using Tavily search backend")
         return _SearchWrapper(_tavily_search)
 
-    searxng_url = os.getenv("SEARXNG_URL", _DEFAULT_SEARXNG_URL)
-    # Check if SearXNG is available by hitting its health endpoint
-    try:
-        import httpx
-
-        with httpx.Client(timeout=3.0) as client:
-            resp = client.get(f"{searxng_url.rstrip('/')}/search?q=health&format=json")
-            if resp.status_code == 200:
-                logger.info("Using SearXNG search backend at %s", searxng_url)
-                return _SearchWrapper(_searxng_search)
-    except Exception:
-        pass
+    if _searxng_is_reachable():
+        logger.info("Using SearXNG search backend at %s", os.getenv("SEARXNG_URL", _DEFAULT_SEARXNG_URL))
+        return _SearchWrapper(_searxng_search)
 
     logger.info("Using DuckDuckGo search backend (fallback)")
     return _SearchWrapper(_duckduckgo_search)
@@ -189,9 +208,79 @@ class _SearchWrapper:
     def invoke(self, params: dict) -> list[dict]:
         query = params.get("query", "")
         max_results = params.get("max_results", 5)
+        language = params.get("language")
         if not query:
             return []
-        return self._impl(query, max_results=max_results)
+        return self._impl(query, max_results=max_results, language=language)
+
+
+def _resolve_ddgs_region(query: str, language: str | None = None) -> str:
+    """Map the resolved search language to a DDGS region code."""
+    code = _resolve_search_language(query, language)
+    return _DDGS_REGION_BY_LANG.get(code, "us-en")
+
+
+def _searxng_is_reachable(base_url: str | None = None) -> bool:
+    """Return True when the configured SearXNG endpoint answers a quick probe."""
+    import httpx
+
+    searxng_url = base_url or os.getenv("SEARXNG_URL", _DEFAULT_SEARXNG_URL)
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{searxng_url.rstrip('/')}/search?q=health&format=json")
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def _resolve_search_language(query: str, language: str | None = None) -> str:
+    """Resolve a SearXNG language code from an explicit hint or query text."""
+    explicit = _normalize_language_hint(language)
+    if explicit:
+        return explicit
+    inferred = _infer_language_from_query(query)
+    return inferred or "en"
+
+
+def _normalize_language_hint(language: str | None) -> str | None:
+    """Map free-form language hints to SearXNG language codes."""
+    if not language:
+        return None
+    normalized = unicodedata.normalize("NFKD", language)
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    cleaned = re.sub(r"[^a-zA-Z_-]", " ", ascii_text).strip().lower()
+    aliases = {
+        "en": "en", "english": "en",
+        "es": "es", "spanish": "es", "espanol": "es", "castilian": "es",
+        "de": "de", "german": "de", "deutsch": "de",
+        "fr": "fr", "french": "fr", "francais": "fr",
+        "it": "it", "italian": "it", "italiano": "it",
+        "pt": "pt", "portuguese": "pt", "portugues": "pt",
+        "ca": "ca", "catalan": "ca", "catala": "ca",
+    }
+    for token in cleaned.replace("-", " ").replace("_", " ").split():
+        if token in aliases:
+            return aliases[token]
+    return None
+
+
+def _infer_language_from_query(query: str) -> str | None:
+    """Infer a likely query language from obvious lexical signals."""
+    lower = f" {query.lower()} "
+    if re.search(r"[äöüß]", lower) or any(term in lower for term in (
+        " gesetz ", " urteil ", " deutschland ", " verordnung ",
+    )):
+        return "de"
+    if re.search(r"[ñáéíóú]", lower) or any(term in lower for term in (
+        " nacionalidad ", " certificado ", " residencia ", " tribunal ",
+        " ley ", " decreto ", " españa ", " español ", " española ", " validez ",
+    )):
+        return "es"
+    if re.search(r"[àâçéèêëîïôûùüÿœæ]", lower) or any(term in lower for term in (
+        " france ", " décret ", " tribunal administratif ", " droit ",
+    )):
+        return "fr"
+    return None
 
 
 # ──────────────────────────────────────────────

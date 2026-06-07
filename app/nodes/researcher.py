@@ -45,6 +45,12 @@ def _parse_goals(plan: str) -> dict[str, list[str]]:
     return {"research": research_goals, "deliverable": deliverable_goals}
 
 
+def _extract_goal_language(goal: str) -> str | None:
+    """Extract a target language from planner annotations on a goal."""
+    lang_match = re.search(r'(?:search|buscar|rechercher)\s+(?:in|using|language:?\s+|en|auf)\s+([^;)]+)', goal, re.IGNORECASE)
+    return lang_match.group(1).strip().rstrip('.') if lang_match else None
+
+
 def _research_single_goal(goal: str, search_tool: Any, llm: Any) -> ResearchFinding:
     """Research a single [RESEARCH] goal: generate queries, search, synthesize.
 
@@ -52,8 +58,7 @@ def _research_single_goal(goal: str, search_tool: Any, llm: Any) -> ResearchFind
     """
     # Step 1: Generate 4-5 search queries for this goal
     # Extract language hints from goal annotations (e.g., "search in Spanish")
-    lang_match = re.search(r'(?:search|buscar|rechercher)\s+(?:in|using|language:?\s+|en|auf)\s+([^;)]+)', goal, re.IGNORECASE)
-    target_lang = lang_match.group(1).strip().rstrip('.') if lang_match else None
+    target_lang = _extract_goal_language(goal)
 
     query_prompt = f"""You are a research specialist. For the following research goal, generate 4-5 highly specific web search queries.
 {f'''IMPORTANT: Generate ALL queries in {target_lang}. Search for {target_lang}-language sources on {target_lang}-language websites.''' if target_lang else ''}
@@ -79,7 +84,7 @@ Return ONLY a JSON array of strings, one query per item. Example:
     all_urls: list[str] = []
     for query in queries:
         try:
-            results = search_tool.invoke({"query": query, "max_results": 5})
+            results = search_tool.invoke({"query": query, "max_results": 5, "language": target_lang})
             search_results.append(format_search_results(query, results))
             for r in results[:2]:  # collect top 2 URLs per query for deep fetch
                 url = r.get("url", "")
@@ -136,7 +141,7 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
     summary = synthesis.content.strip()
 
     # Step 3b: Verification pass — cross-check findings with targeted search
-    verification_note = _verify_findings(goal, summary, search_tool)
+    verification_note = _verify_findings(goal, summary, search_tool, target_lang)
     if verification_note:
         summary += "\n\n" + verification_note
 
@@ -161,7 +166,7 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
     )
 
 
-def _verify_findings(goal: str, summary: str, search_tool: Any) -> str:
+def _verify_findings(goal: str, summary: str, search_tool: Any, target_lang: str | None = None) -> str:
     """Run a targeted verification search to catch domain mismatches.
 
     Generates a disambiguating query that includes the goal plus contextual
@@ -191,7 +196,7 @@ def _verify_findings(goal: str, summary: str, search_tool: Any) -> str:
     logger.info("Verification pass: searching %r", verify_query[:80])
 
     try:
-        results = search_tool.invoke({"query": verify_query, "max_results": 3})
+        results = search_tool.invoke({"query": verify_query, "max_results": 3, "language": target_lang})
         if not results:
             return ""
 

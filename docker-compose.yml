@@ -8,7 +8,7 @@
 
 services:
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.6.2-e964708c0
     container_name: deep-research-searxng
     restart: unless-stopped
     ports:
@@ -37,8 +37,10 @@ services:
     environment:
       - SEARXNG_URL=http://searxng:8080
       - RESEARCH_OUTPUT_DIR=/data
+      - CHECKPOINT_DB_PATH=/app/checkpoints/checkpoints.db
     volumes:
       - research_data:/data
+      - research_checkpoints:/app/checkpoints
     depends_on:
       searxng:
         condition: service_healthy
@@ -54,6 +56,7 @@ services:
 volumes:
   searxng_config:
   research_data:
+  research_checkpoints:
 
 networks:
   research-net:

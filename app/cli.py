@@ -318,15 +318,6 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
 
 def main() -> None:
     """CLI entry point."""
-    # Validate config before anything else
-    issues = config.validate()
-    if issues:
-        for issue in issues:
-            print(f"[CONFIG] {issue}", file=sys.stderr)
-        # Block if critical (missing API key or base)
-        if any("WORKER_API_KEY" in i or "WORKER_API_BASE" in i for i in issues):
-            print("[FATAL] Missing required configuration. Set environment variables and retry.", file=sys.stderr)
-            sys.exit(1)
     parser = argparse.ArgumentParser(
         description="Deep Research Agent — LangGraph-based multi-phase research"
     )
@@ -370,6 +361,15 @@ def main() -> None:
         parser.print_help()
         print("\nError: Provide a research topic or --topic-file")
         sys.exit(1)
+
+    # Validate config only for real research runs. argparse handles --help/--version itself.
+    issues = config.validate()
+    if issues:
+        for issue in issues:
+            print(f"[CONFIG] {issue}", file=sys.stderr)
+        if any("WORKER_API_KEY" in i or "WORKER_API_BASE" in i for i in issues):
+            print("[FATAL] Missing required configuration. Set environment variables and retry.", file=sys.stderr)
+            sys.exit(1)
 
     run_research(topic, auto_approve=args.auto, generate_pdf=args.pdf)
 

@@ -1,0 +1,55 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e . pytest
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: CLI help works without config
+        run: python -m app.cli --help >/tmp/cli-help.txt
+
+      - name: Build Docker image
+        run: docker build -t deep-research-agent .
+
+      - name: Container smoke test
+        run: |
+          docker run -d --name deep-research-agent-ci \
+            -p 8100:8100 \
+            -e WORKER_API_KEY=dummy-key \
+            -e WORKER_API_BASE=https://api.openai.com/v1 \
+            -e CHECKPOINT_DB_PATH=/app/checkpoints/checkpoints.db \
+            deep-research-agent
+          trap 'docker logs deep-research-agent-ci; docker rm -f deep-research-agent-ci' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8100/health >/dev/null && break
+            sleep 2
+          done
+          curl -sf http://localhost:8100/health
+          ready_json=$(curl -s http://localhost:8100/ready)
+          python - <<'PY' "$ready_json"
+          import json, sys
+          payload = json.loads(sys.argv[1])
+          assert payload["server"] == "deep-research"
+          assert set(["config", "report_dir", "checkpoint_db", "llm_api", "search_backend"]).issubset(payload["checks"])
+          assert payload["status"] in {"ok", "degraded"}
+          PY
+          curl -sf -X POST http://localhost:8100/mcp \
+            -H 'Content-Type: application/json' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'

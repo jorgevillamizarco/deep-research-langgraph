@@ -548,3 +548,144 @@ def test_browser_extraction_graceful_degradation():
         result = _fetch_via_browser("https://example.com", max_chars=500)
         assert isinstance(result, str)
         assert result == ""  # graceful degradation
+
+
+def test_search_wrapper_passes_language_to_backend():
+    """Search wrapper preserves requested language for backend selection."""
+    from app.tools.search import _SearchWrapper
+
+    calls = {}
+
+    def fake_impl(query: str, max_results: int = 5, language: str | None = None):
+        calls["query"] = query
+        calls["max_results"] = max_results
+        calls["language"] = language
+        return []
+
+    wrapper = _SearchWrapper(fake_impl)
+    wrapper.invoke({"query": "nacionalidad española", "max_results": 3, "language": "Spanish"})
+
+    assert calls == {
+        "query": "nacionalidad española",
+        "max_results": 3,
+        "language": "Spanish",
+    }
+
+
+def test_duckduckgo_search_maps_language_to_region(monkeypatch):
+    """DDGS fallback maps language hints to region-specific search locales."""
+    import app.tools.search as search
+
+    calls = {}
+
+    class FakeDDGS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def text(self, query, **kwargs):
+            calls["query"] = query
+            calls.update(kwargs)
+            return [{"title": "A", "href": "https://example.com", "body": "snippet"}]
+
+    monkeypatch.setattr(search, "DDGS", FakeDDGS)
+    results = search._duckduckgo_search("nacionalidad española", max_results=2, language="Spanish")
+
+    assert calls["region"] == "es-es"
+    assert results[0]["url"] == "https://example.com"
+
+
+def test_tavily_search_routes_non_english_queries_to_searxng(monkeypatch):
+    """Non-English Tavily requests route through SearXNG when available."""
+    import app.tools.search as search
+
+    monkeypatch.setattr(search, "_searxng_is_reachable", lambda base_url=None: True)
+    monkeypatch.setattr(
+        search,
+        "_searxng_search",
+        lambda query, max_results=5, base_url=None, language=None: [{
+            "title": "SearXNG",
+            "url": "https://example.com/searxng",
+            "snippet": language or "",
+        }],
+    )
+
+    results = search._tavily_search("nacionalidad española", max_results=1, language="Spanish")
+
+    assert results == [{
+        "title": "SearXNG",
+        "url": "https://example.com/searxng",
+        "snippet": "Spanish",
+    }]
+
+
+def test_normalize_language_hint_supports_native_names_with_diacritics():
+    """Language hints like 'español' normalize to the correct search code."""
+    from app.tools.search import _normalize_language_hint
+
+    assert _normalize_language_hint("español") == "es"
+    assert _normalize_language_hint("français") == "fr"
+    assert _normalize_language_hint("Português") == "pt"
+    assert _normalize_language_hint("Català") == "ca"
+
+
+def test_infer_language_from_query_prefers_german_for_umlaut_only_queries():
+    """German umlaut-only queries should not be misclassified as Spanish."""
+    from app.tools.search import _infer_language_from_query
+
+    assert _infer_language_from_query("Urteil für München") == "de"
+
+
+def test_research_single_goal_passes_language_hint_to_search_backend():
+    """Research goals annotated with a language hint search in that language."""
+    from app.nodes.researcher import _research_single_goal
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return type("Resp", (), {"content": '["consulta oficial"]'})()
+            return type("Resp", (), {
+                "content": "Hallazgo con [Fuente](https://example.com/fuente). [CONFIDENCE:4]"
+            })()
+
+    class FakeSearchTool:
+        def __init__(self):
+            self.languages = []
+
+        def invoke(self, params):
+            self.languages.append(params.get("language"))
+            return [{"title": "Fuente", "url": "https://example.com/fuente", "snippet": "contenido"}]
+
+    search_tool = FakeSearchTool()
+    finding = _research_single_goal(
+        "Analiza la validez del certificado CCSE (search in Spanish; sources: boe.es)",
+        search_tool,
+        FakeLLM(),
+    )
+
+    assert finding.goal_text.startswith("Analiza la validez")
+    assert finding.search_queries == ["consulta oficial"]
+    assert search_tool.languages == ["Spanish"]
+    assert finding.citations[0].url == "https://example.com/fuente"
+
+
+def test_cli_help_does_not_require_config(monkeypatch, capsys):
+    """CLI --help should print usage without requiring API env vars."""
+    import app.cli as cli
+
+    monkeypatch.setattr("sys.argv", ["deep-research", "--help"])
+
+    try:
+        cli.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+
+    captured = capsys.readouterr()
+    assert "Deep Research Agent" in captured.out
+    assert "WORKER_API_KEY" not in captured.err

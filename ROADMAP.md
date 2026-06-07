@@ -44,13 +44,13 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] One-command deploy (`deploy.sh start`)
 - [x] Env var validation at startup (blocks on critical, warns on non-critical)
 - [x] Comprehensive docs (AGENTS.md, ARCHITECTURE.md, ROADMAP.md)
-- [x] 29 tests (25 unit + 4 E2E), all passing in ~10s
+- [x] 48 tests (unit + E2E + HTTP/MCP route coverage)
 - [x] Writable directory fallback chain for report output
 - [x] SSE streaming endpoint for real-time progress
 - [x] Checkpoint DB survives container recreation — named volume `research_checkpoints:/app/checkpoints` (June 2026)
-- [ ] Deep health check — `/health` returns 200 even if LLM is unreachable
+- [x] Deep readiness check — `/ready` verifies config, report dir, checkpoint DB, LLM endpoint, and search backend
 
-**Verdict:** Production-usable for single-user deployment. Supports concurrent research tasks within a single container. Checkpoints persist across deploys. Not production-grade for multi-tenant or mission-critical use. The remaining 8 operational gaps are alerting, runbook, rate limiting, horizontal scaling, request queuing, deep health, input sanitization, and versioned releases — none architectural.
+**Verdict:** Production-usable for single-user deployment. Supports concurrent research tasks within a single container. Checkpoints persist across deploys. Not production-grade for multi-tenant or mission-critical use. The remaining 7 operational gaps are alerting, runbook, rate limiting, horizontal scaling, request queuing, input sanitization, and versioned releases — none architectural.
 
 **Research quality improvements (May 2026):**
 - Topic enrichment: raw user topics are pre-processed into structured research briefs with domain context and ambiguity detection
@@ -99,7 +99,12 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Checkpoint persistence (named Docker volume `research_checkpoints`, survives container recreation)
 - [x] SearXNG version pinned (2026.6.2-e964708c0, was `:latest`)
 - [x] Language-aware search (enrichment → planner annotation → researcher query generation in target language)
+- [x] Search backend language propagation (SearXNG honors target language instead of forcing English)
 - [x] Error page detection (404/403/500 detection in 4 languages, domain-root fallback, prevents synthesis from error pages)
+- [x] Persisted dashboard history (`/tasks` merges memory + disk-backed task metadata)
+- [x] Deep readiness endpoint (`/ready`)
+- [x] HTTP/MCP route tests (`tests/test_mcp_server.py`) + CI Docker/MCP smoke coverage
+- [x] CLI help without config + `ddgs` migration + README smoke-test cleanup
 
 ## Technical Debt & Known Issues
 
@@ -188,6 +193,19 @@ Also added `ENABLE_EVALUATOR` env var to disable evaluation entirely (auto-PASS)
 - `operator.or_` reducer merges per-node dicts across invocations
 - CLI displays per-node tokens with percentages after research completes
 - Example output: `planner: 1,234 tokens (12.2%), researcher: 7,890 tokens (78.1%)`
+
+## Improvement Opportunities — Review Findings (June 2026)
+
+Implemented. The review findings below were converted into shipped changes.
+
+| Status | Area | What changed |
+|---|---|---|
+| ✅ | Deploy consistency | `docker-compose.yml` now matches `deploy.sh` for SearXNG pinning and checkpoint persistence (`research_checkpoints:/app/checkpoints`, `CHECKPOINT_DB_PATH=/app/checkpoints/checkpoints.db`). `deploy.sh start` also rebuilds the current image before restarting, so code changes are actually deployed. |
+| ✅ | Search quality | Search now preserves explicit language hints end-to-end. SearXNG no longer forces English, Tavily routes non-English searches through SearXNG when available, and DDGS fallback maps hints to locale-specific regions. Added regression tests for diacritics, German-vs-Spanish inference, backend propagation, and planner-to-search language flow. |
+| ✅ | Persistence / UX | `/tasks` now merges in-memory tasks with persisted `task_*.json` metadata, and the HTTP app hydrates recent completed tasks from disk on startup. Dashboard history survives restarts. |
+| ✅ | Test coverage | Added `tests/test_mcp_server.py` covering POST `/mcp`, `/tasks`, `/ready`, `/download`, local/private-network dashboard gating, spoofed-header rejection, `/stream/{task_id}`, and dashboard load. Added GitHub Actions CI to run tests plus Docker/MCP smoke checks. |
+| ✅ | Health checks | Added `/ready` for deep readiness checks while keeping `/health` as cheap liveness. Readiness verifies config presence, writable output/checkpoint paths, authenticated LLM endpoint reachability, and the active search backend with a real probe. |
+| ✅ | Tooling / operator friction | `python -m app.cli --help` now works without API config. Pytest warning removed by dropping the stale asyncio config. Search dependency migrated to `ddgs`. README updated to the real env and smoke-test flow. |
 
 ## Next — Polish
 
