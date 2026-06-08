@@ -132,7 +132,8 @@ def enhanced_search_executor_node(state: ResearchState) -> dict:
     all_new_content = []
     new_sources_merged = {}
     new_url_map_merged = {}
-    existing_count = len(state.get("url_to_short_id", {}))
+    existing_url_map = dict(state.get("url_to_short_id", {}))
+    existing_count = len(existing_url_map)
 
     for query in follow_ups:
         if isinstance(query, str):
@@ -144,11 +145,25 @@ def enhanced_search_executor_node(state: ResearchState) -> dict:
             formatted = format_search_results(query_text, results)
             all_new_content.append(formatted)
 
-            # Extract citations from these results
+            # Extract citations, remapping duplicates to existing IDs
             counter = existing_count + len(new_url_map_merged)
             sources, url_map = extract_citations_from_content(formatted, counter)
-            new_sources_merged.update(sources)
-            new_url_map_merged.update(url_map)
+
+            # Remap: if URL already exists, reuse existing short_id
+            remapped_sources = {}
+            remapped_url_map = {}
+            for sid, src in sources.items():
+                url = src.get("url", "")
+                canonical_sid = existing_url_map.get(url)
+                if canonical_sid and canonical_sid != sid:
+                    remapped_sources[canonical_sid] = src
+                    remapped_url_map[url] = canonical_sid
+                else:
+                    remapped_sources[sid] = src
+                    remapped_url_map[url] = sid
+
+            new_sources_merged.update(remapped_sources)
+            new_url_map_merged.update(remapped_url_map)
 
         except Exception as e:
             logger.warning("Follow-up search failed for query %r: %s", query_text, e)
@@ -174,11 +189,23 @@ the gaps identified in the evaluation comment:
 Write a coherent supplement that ADDS TO (not repeats) the existing findings.
 Cite sources with markdown links."""
 
-        synthesis = llm.invoke([
-            SystemMessage(content="You fill research gaps with supplementary findings."),
-            HumanMessage(content=synthesis_prompt),
-        ])
-        supplement = synthesis.content.strip()
+        try:
+            synthesis = llm.invoke([
+                SystemMessage(content="You fill research gaps with supplementary findings."),
+                HumanMessage(content=synthesis_prompt),
+            ])
+            supplement = synthesis.content.strip()
+        except Exception as e:
+            logger.warning("Enhancement synthesis failed: %s", e)
+            print(f"  WARNING  Enhancement failed ({e}) returning Phase 1 findings", flush=True)
+            return {
+                "section_research_findings": existing_findings,
+                "sources": state.get("sources", {}),
+                "url_to_short_id": state.get("url_to_short_id", {}),
+                "evidence_gaps": state.get("evidence_gaps", []),
+                "iteration_count": state.get("iteration_count", 0) + 1,
+                "errors": state.get("errors", []) + [f"Enhancement failed: {e}"],
+            }
     else:
         supplement = "No new search results were available for follow-up queries."
 

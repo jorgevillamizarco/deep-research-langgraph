@@ -630,3 +630,65 @@ def test_evidence_gap_regex_excludes_meta_commentary():
 
     for line in real_gaps:
         assert not _is_meta_commentary(line), f"Should NOT be flagged: {line}"
+
+
+def test_merge_findings_deduplicates_sources_at_registration():
+    """Sources with duplicate URLs should not be registered multiple times."""
+    from app.agent import merge_findings_node
+    from app.models import ResearchFinding
+
+    f1 = ResearchFinding(
+        goal_text="Goal 1",
+        summary="Finding 1",
+        sources={"src-1": {"url": "https://example.com/a", "tier": 3}},
+        confidence_tags=[],
+    )
+    f2 = ResearchFinding(
+        goal_text="Goal 2",
+        summary="Finding 2",
+        sources={"src-2": {"url": "https://example.com/a", "tier": 3}},  # same URL
+    )
+    f3 = ResearchFinding(
+        goal_text="Goal 3",
+        summary="Finding 3",
+        sources={"src-3": {"url": "https://example.com/b", "tier": 2}},
+    )
+
+    state = {
+        "parallel_findings": [f1, f2, f3],
+        "sources": {},
+        "url_to_short_id": {},
+        "research_topic": "test",
+    }
+
+    result = merge_findings_node(state)
+    sources = result.get("sources", {})
+
+    # Count URLs — should not have duplicates
+    urls = [s.get("url", "") for s in sources.values() if s.get("url")]
+    unique_urls = set(urls)
+    assert len(urls) == len(unique_urls), \
+        f"Duplicate URLs found: {len(urls)} entries for {len(unique_urls)} unique URLs"
+
+
+def test_enhancer_graceful_degradation():
+    """When enhancer LLM call fails, research should continue with Phase 1 findings."""
+    from app.nodes.enhancer import enhanced_search_executor_node
+
+    state = {
+        "section_research_findings": "Phase 1 findings content.",
+        "sources": {"src-1": {"url": "https://x.com/1", "tier": 3}},
+        "evidence_gaps": [{"gap_id": "gap-1", "description": "missing data"}],
+        "evaluation_scores": [{"source_quality": 3, "claim_verification": 3, "completeness": 3}],
+        "research_evaluation": unittest.mock.MagicMock(grade="fail", follow_up_queries=["find more data"]),
+        "research_topic": "test",
+        "iteration_count": 0,
+    }
+
+    with unittest.mock.patch("app.nodes.enhancer._get_llm") as mock_llm:
+        mock_llm.return_value.invoke.side_effect = RuntimeError("API rate limited")
+        result = enhanced_search_executor_node(state)
+
+    findings = result.get("section_research_findings", "")
+    assert findings, "Should preserve Phase 1 findings on enhancer failure"
+    assert "Phase 1 findings" in findings, "Phase 1 content should be preserved"

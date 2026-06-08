@@ -1015,3 +1015,38 @@ All P1 and P2 tasks completed across 4 commits. P3 (polish) deferred — contrad
 | Test suite | 83/83 passing (6 new integration tests) |
 
 **Remaining:** P2.3 contradiction detection (needs trigger data), P3.1 claim text polish.
+
+## Resilience Hardening — Round 2 Improvements
+
+*Plan written 2026-06-08 after 3-round live test exposed 2 systemic issues.*
+
+### Findings from 3-round test
+
+| Issue | Prevalence | Impact |
+|-------|-----------|--------|
+| API rate-limiting kills entire research run | 1/3 runs (run 2) | Complete task failure when Phase 2 enhancer hits rate limit. Phase 1 findings exist but are discarded. |
+| Source duplicates at registration time | Every run (17-40 dups) | We deduplicate at render time but the root cause persists: `merge_findings_node` registers sources without checking for existing URLs. |
+
+### Improvement 1: Graceful degradation on API failure
+
+**Problem:** When Phase 2 enhancer LLM call fails (rate limit, transient error), the entire research task fails with "no working provider." Phase 1 findings — which completed successfully — are discarded.
+
+**Fix:** Catch LLM errors in enhancer node and Phase 2 researcher. Instead of crashing, return findings from Phase 1 and proceed to composer. Add `graceful_degradation: True` to state so the Final QA can note the degraded status.
+
+**Files:** `app/nodes/enhancer.py`, `app/agent.py` (refinement subgraph error handling)
+**Test:** Mock LLM to raise an exception in enhancer, verify the graph continues to composer instead of failing.
+
+### Improvement 2: Source dedup at registration time
+
+**Problem:** `merge_findings_node` registers all sources from Phase 1 and Phase 2 without checking if URLs already exist. Every run produces 17-40 duplicate entries that the composer cleans up. Prevention is cheaper than cleanup.
+
+**Fix:** In `merge_findings_node`, before adding a new source, check if its URL already exists in `all_sources`. If so, skip registration. Build a remapping dict (`new_id → existing_id`) so claim references stay consistent.
+
+**Files:** `app/agent.py` (merge_findings_node)
+**Test:** Feed findings with duplicate URLs, verify sources dict has zero duplicates.
+
+### Stop condition
+
+- Live test: research completes without total failure on rate-limited runs (graceful degradation proven)
+- Live test: 0 duplicate source warnings (dedup prevention proven)
+- 83+ tests passing
