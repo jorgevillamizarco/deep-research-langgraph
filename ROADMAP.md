@@ -207,6 +207,632 @@ Implemented. The review findings below were converted into shipped changes.
 | ✅ | Health checks | Added `/ready` for deep readiness checks while keeping `/health` as cheap liveness. Readiness verifies config presence, writable output/checkpoint paths, authenticated LLM endpoint reachability, and the active search backend with a real probe. |
 | ✅ | Tooling / operator friction | `python -m app.cli --help` now works without API config. Pytest warning removed by dropping the stale asyncio config. Search dependency migrated to `ddgs`. README updated to the real env and smoke-test flow. |
 
+
+## Unified Implementation Plan — Evidence-Structured, Audience-Aware Research Reports (June 2026)
+
+### Goal
+
+Upgrade the agent from a synthesis-first report generator into a blueprint-first, evidence-structured research system that produces audience-specific decision artifacts with auditable claims, source quality, and final report QA.
+
+This plan unifies three inputs:
+
+1. Internal deep research on deep-research agent architectures: critic pass, source scoring, outline-before-retrieval, sufficiency checks, budgeted/model-routed execution.
+2. Review of the ChatGPT Deep Research PDF `SpaceX IPO Research for a Retail Investor.pdf`: strong audience framing, decision-support tables, scenario analysis, retail-specific checklist, and answer-first recommendation.
+3. Existing project architecture: LangGraph two-phase execution, typed model bridge, citations, evaluator loop, MCP/dashboard runtime, Docker deployment.
+
+### Product principles
+
+- Audience first: the report shape should depend on who is deciding and what decision they need to make.
+- Blueprint before retrieval: the planner should define required sections, tables, scenarios, evidence needs, and decision artifacts before research begins.
+- Evidence before prose: synthesis should be backed by structured claims, sources, contradictions, and gaps, not only markdown findings.
+- Critic after rendering: the final report artifact must be audited for unsupported claims, missing sections, hidden contradictions, and over-strong recommendations.
+- YAGNI: ship deterministic schemas and simple heuristics before introducing Redis, vector stores, complex schedulers, or multi-agent coordination layers.
+
+### Non-goals for this iteration
+
+- No Redis/shared context store.
+- No vector database.
+- No full multi-agent rewrite.
+- No token-budget-aware scheduler beyond simple per-run/per-section caps.
+- No replacement of LangGraph or MCP runtime.
+- No mandatory PDF formatting overhaul; markdown remains the canonical artifact.
+
+### Target architecture delta
+
+Current flow:
+
+```text
+planner → parallel researchers → merge → deliverable/evaluator/enhancer loop → composer → report
+```
+
+Target flow after this plan:
+
+```text
+topic enrichment
+  → report blueprint planner
+  → evidence-needs-aware parallel research
+  → source scoring + evidence normalization
+  → deliverable/evaluator/enhancer loop
+  → component-based composer
+  → final report critic
+  → cited report + evidence appendix + QA summary
+```
+
+The key change is adding an explicit `ReportBlueprint` and evidence layer between planning, research, composition, and QA.
+
+---
+
+### Phase 1 — Report blueprint and audience-aware templates
+
+**Objective:** Make the planner choose the right report shape before retrieval.
+
+**Files:**
+- Modify: `app/models.py`
+- Modify: `app/state.py`
+- Modify: `app/nodes/planner.py`
+- Modify: `app/agent.py` — only if blueprint/evidence-needs metadata must be passed through `Send(...)` payloads
+- Test: `tests/test_agent.py`
+
+**Data model to add in `app/models.py`:**
+
+```python
+from typing import Literal
+from pydantic import BaseModel, Field
+
+ReportTemplate = Literal[
+    "generic_research_report",
+    "decision_memo",
+    "retail_investor_memo",
+    "architecture_review",
+    "compare_and_recommend",
+    "legal_policy_brief",
+]
+
+class ReportSectionSpec(BaseModel):
+    title: str
+    purpose: str
+    required_evidence: list[str] = Field(default_factory=list)
+    required_components: list[str] = Field(default_factory=list)
+
+class ReportBlueprint(BaseModel):
+    audience: str = "general"
+    decision_context: str = ""
+    template: ReportTemplate = "generic_research_report"
+    sections: list[ReportSectionSpec] = Field(default_factory=list)
+    required_tables: list[str] = Field(default_factory=list)
+    required_scenarios: list[str] = Field(default_factory=list)
+    required_decision_artifacts: list[str] = Field(default_factory=list)
+    source_requirements: list[str] = Field(default_factory=list)
+    confidence_policy: str = "State confidence for major claims and sections."
+```
+
+**State additions in `app/state.py`:**
+
+```python
+report_blueprint: Optional[dict]
+"""Serialized ReportBlueprint produced by planner."""
+```
+
+**Planner behavior:**
+
+- Extend topic enrichment to infer audience and decision context.
+- Generate `ReportBlueprint` from the enriched topic and plan in both runtime paths: `generate_plan_only(...)` and `planner_node(...)`. Do not let CLI/MCP and direct graph invocation diverge.
+- Prefer a shared helper, e.g. `generate_blueprint_and_sections(...)`, so template selection, section generation, and fallback behavior live in one place.
+- Keep `report_sections` for backward compatibility, but derive it from blueprint sections.
+- Use deterministic fallback if the LLM returns malformed blueprint JSON.
+- If researchers need blueprint/evidence-needs context, update `app/agent.py` routing so `Send(...)` includes the relevant serialized blueprint or per-goal evidence need, not only `current_goal`.
+
+**Template-selection heuristics:**
+
+- If topic includes “should I invest”, “IPO”, “stock”, “retail investor” → `retail_investor_memo`.
+- If topic asks “should we choose/build/adopt” → `decision_memo`.
+- If topic asks architecture/system/design improvement → `architecture_review`.
+- If topic asks compare/rank/best → `compare_and_recommend`.
+- If topic is legal/regulatory/jurisdiction-specific → `legal_policy_brief`.
+- Else → `generic_research_report`.
+
+**Tests first:**
+
+- `test_selects_retail_investor_template_for_ipo_question`
+- `test_selects_architecture_review_template_for_agent_architecture_topic`
+- `test_blueprint_fallback_preserves_existing_report_sections_when_json_invalid`
+- `test_generate_plan_only_returns_report_blueprint`
+- `test_planner_node_returns_report_blueprint`
+- `test_parallel_researcher_receives_blueprint_evidence_needs` if `Send(...)` payloads are extended
+
+**Acceptance criteria:**
+
+- Planner returns a valid serialized blueprint for normal runs.
+- CLI/MCP (`generate_plan_only`) and direct graph invocation (`planner_node`) populate `report_blueprint` consistently.
+- Existing tests still pass without requiring all callers to use blueprint immediately.
+- `report_sections` remains populated for composer compatibility.
+
+---
+
+### Phase 2 — Structured evidence model and source appendix
+
+**Objective:** Make reports auditable by storing major claims, source support, contradictions, and gaps as structured state.
+
+**Files:**
+- Modify: `app/models.py`
+- Modify: `app/state.py`
+- Modify: `app/tools/citations.py`
+- Modify: `app/nodes/researcher.py`
+- Modify: `app/agent.py` if global source allocation belongs at merge/fan-in boundaries
+- Test: `tests/test_agent.py`
+
+**Models to add:**
+
+```python
+class EvidenceSource(BaseModel):
+    source_id: str
+    title: str = ""
+    url: str
+    domain: str = ""
+    tier: int = Field(default=3, ge=1, le=3)
+    source_type: str = "unknown"  # official, academic, company, news, analyst, community
+    authority_reason: str = ""
+    used_for_claims: list[str] = Field(default_factory=list)
+
+class EvidenceClaim(BaseModel):
+    claim_id: str
+    text: str
+    section: str = ""
+    confidence: int = Field(default=3, ge=1, le=5)
+    support_source_ids: list[str] = Field(default_factory=list)
+    contradicting_source_ids: list[str] = Field(default_factory=list)
+    evidence_strength: str = "medium"  # high, medium, low
+    needs_followup: bool = False
+
+class EvidenceGap(BaseModel):
+    gap_id: str
+    description: str
+    why_it_matters: str
+    attempted_queries: list[str] = Field(default_factory=list)
+    impact_on_conclusion: str = "unknown"
+
+class Contradiction(BaseModel):
+    contradiction_id: str
+    claim_a: str
+    claim_b: str
+    source_ids: list[str] = Field(default_factory=list)
+    resolution: str = "unresolved"
+```
+
+**State additions:**
+
+```python
+evidence_claims: Annotated[list, operator.add]
+evidence_gaps: Annotated[list, operator.add]
+contradictions: Annotated[list, operator.add]
+source_scores: Annotated[dict, operator.or_]
+```
+
+**Model consolidation rule:**
+
+Do not create three competing source schemas. Keep `state.sources` as the canonical source register and extend its dict shape minimally toward `EvidenceSource`. Existing `Citation` / `CitationSource` wrappers can remain as boundary adapters, but all global IDs, source scores, and appendix rows must come from `state.sources`.
+
+**Critical prerequisite — global source IDs:**
+
+Parallel researchers may create local `src-1`, `src-2`, etc. Those IDs are not globally stable. At merge/fan-in, normalize all sources through `url_to_short_id` as the canonical allocator. Never trust a per-finding local `short_id` from a parallel worker as the global ID.
+
+**Implementation approach:**
+
+- Start with deterministic extraction from existing findings:
+  - URLs and markdown links become canonical `state.sources` entries.
+  - `[CONFIDENCE:N]` tags become claim confidence hints; preferably parse them into `ResearchFinding.confidence_tags` inside `_research_single_goal()` rather than reparsing only at composer time.
+  - Lines prefixed with `CONTRADICTION:` become `Contradiction` records.
+  - Phrases like “not found”, “missing”, “could not retrieve”, “unconfirmed” become `EvidenceGap` candidates.
+- Append the Evidence Appendix deterministically after `replace_citation_tags(...)`. Do not ask the LLM to invent appendix rows.
+- Do not introduce an LLM claim extractor in the first pass. Add it later only if deterministic extraction is insufficient.
+
+**Source appendix output:**
+
+Composer should be able to render:
+
+```markdown
+## Evidence Appendix
+
+### Source Register
+| Source | Tier | Type | Used for | Notes |
+|---|---:|---|---|---|
+
+### Major Claims
+| Claim | Confidence | Evidence | Caveat |
+|---|---:|---|---|
+
+### Missing Evidence
+| Gap | Why it matters | Impact |
+|---|---|---|
+```
+
+**Tests first:**
+
+- `test_extracts_evidence_claims_from_confidence_tags`
+- `test_extracts_contradictions_from_findings`
+- `test_extracts_missing_evidence_register_from_gap_language`
+- `test_source_appendix_uses_stable_source_ids`
+- `test_parallel_findings_do_not_collide_source_ids`
+- `test_research_single_goal_populates_confidence_tags_from_summary`
+- `test_evidence_appendix_is_rendered_from_state_not_llm_prose`
+
+**Acceptance criteria:**
+
+- Every report can include an evidence appendix without another web search.
+- Source IDs are stable within a run and cannot collide across parallel findings.
+- The appendix does not duplicate raw URL dumps; it summarizes source purpose and claim coverage.
+- Phase 2 may use existing citation tiers only; Phase 3 enriches source ordering/scoring later.
+
+---
+
+### Phase 3 — Source scoring before synthesis
+
+**Objective:** Prefer authoritative, recent, relevant, diverse sources before the composer sees them.
+
+**Files:**
+- Modify: `app/tools/citations.py`
+- Modify: `app/models.py`
+- Modify: `app/nodes/researcher.py`
+- Test: `tests/test_agent.py`
+
+**Scoring heuristic:**
+
+```text
+score = authority + relevance + recency + diversity - duplication_penalty - low_quality_penalty
+```
+
+For v1, only score fields that are actually captured. Current synthesized findings usually preserve URL/title/tier, not raw search snippets, search rank, query, or detected publication date. Either capture raw search result metadata in `ResearchFinding` / a `SourceCandidate` model before scoring, or explicitly limit v1 scoring to URL/domain/title/tier.
+
+Initial deterministic weights:
+
+| Signal | Points |
+|---|---:|
+| Official/government/company filing/source-of-record | +40 |
+| Academic/standards/primary technical docs | +30 |
+| Reputable industry or financial publication | +20 |
+| Community/forum/social post | +5 |
+| URL/title/snippet contains core query terms | +0..20 |
+| Recent date detected for time-sensitive topic | +0..15 |
+| Same-domain duplicate | -15 |
+| Obvious SEO/content farm | -25 |
+
+**Tests first:**
+
+- `test_source_scoring_prioritizes_official_filing_over_news`
+- `test_source_scoring_penalizes_duplicate_domains`
+- `test_source_scoring_marks_community_sources_low_authority`
+- `test_researcher_serializes_sources_sorted_by_score_for_composer`
+- `test_source_candidate_preserves_query_rank_snippet_when_available` if snippet/recency scoring is implemented
+
+**Acceptance criteria:**
+
+- Composer receives source metadata sorted by source score for the evidence appendix.
+- Key claims should prefer top-scored sources where available.
+- No network calls required for scoring; use captured URL/domain/title/tier metadata, and only use snippet/date/query/rank if the researcher explicitly stores them.
+
+---
+
+### Phase 4 — Component-based composer and audience-specific report blocks
+
+**Objective:** Copy the useful presentation strengths from the ChatGPT retail-investor PDF without copying its weak evidence traceability.
+
+**Files:**
+- Modify: `app/nodes/composer.py`
+- Modify: `app/models.py`
+- Test: `tests/test_agent.py`
+
+**Implementation constraint:**
+
+Do not build a large template engine in v1. Implement template defaults as ordered heading/block lists plus composer prompt instructions. The Evidence Appendix is the only deterministic renderer required initially. Extract classes/renderers later only when repeated logic proves it is needed.
+
+**Component blocks to support:**
+
+| Component | Purpose | Templates using it |
+|---|---|---|
+| `answer_first_summary` | Direct answer + main reasons | all |
+| `what_is_being_decided` | Clarify actual exposure/choice/tradeoff | decision, investor, architecture |
+| `key_facts_table` | Compact facts | decision, investor, compare |
+| `timeline` | Dates/events | investor, legal/policy, market |
+| `economics_or_mechanics` | How the thing works | investor, architecture, technical |
+| `scenario_table` | bear/base/bull or option A/B/C | decision, investor, compare |
+| `risk_table` | risks, probability/impact, evidence | decision, investor, architecture |
+| `decision_checklist` | user-specific go/no-go checklist | decision, investor |
+| `recommendation_block` | explicit action and caveats | decision, investor, compare |
+| `open_questions` | unresolved items | all |
+| `evidence_appendix` | auditability | all standard-depth reports |
+
+**Template defaults:**
+
+- `retail_investor_memo`: executive summary, what is being offered, business/economics, valuation scenarios, risk table, retail checklist, recommendation, open questions, evidence appendix.
+- `architecture_review`: executive summary, current architecture, options/tradeoffs, implementation roadmap, risks, recommendation, evidence appendix.
+- `decision_memo`: executive summary, decision context, options, criteria, scenarios, recommendation, caveats, evidence appendix.
+- `compare_and_recommend`: executive summary, comparison matrix, scoring rationale, recommendation, caveats, evidence appendix.
+- `legal_policy_brief`: question presented, authority hierarchy, controlling sources, ambiguity, practical answer, caveats, evidence appendix.
+
+**Composer constraints:**
+
+- Keep markdown as source of truth.
+- Use existing `<cite source="src-N" />` tags and replacement pipeline.
+- Keep inline citations for readability.
+- Add appendices for auditability.
+- Avoid detached numeric endnotes as the only citation system.
+
+**Tests first:**
+
+- `test_composer_uses_retail_investor_template_blocks`
+- `test_composer_uses_architecture_review_template_blocks`
+- `test_composer_includes_evidence_appendix_for_standard_depth`
+- `test_brief_depth_omits_evidence_appendix_and_long_tables`
+- `test_composer_preserves_existing_citation_replacement`
+
+**Acceptance criteria:**
+
+- A retail-investor-style topic produces decision-support sections, not a generic research report.
+- Architecture topics produce a roadmap/tradeoff/report shape.
+- Reports remain cited markdown and existing PDF generation still works.
+
+---
+
+### Phase 5 — Final report critic pass
+
+**Objective:** Audit the rendered report, not just intermediate findings.
+
+**Files:**
+- Create: `app/nodes/report_critic.py`
+- Modify: `app/agent.py`
+- Modify: `app/state.py`
+- Modify: `app/config.py`
+- Modify: `app/nodes/composer.py`
+- Modify: `app/mcp_server.py` — stage labels/progress/status must account for the post-composer critic
+- Test: `tests/test_agent.py`
+- Test: `tests/test_integration.py`
+- Test: `tests/test_mcp_server.py`
+
+**Critic checks:**
+
+- Required blueprint sections are present.
+- Required decision artifacts are present.
+- Major factual claims have citations.
+- Recommendation strength matches evidence strength.
+- Low-confidence claims are hedged.
+- Contradictions are not hidden.
+- Missing evidence is disclosed.
+- Evidence appendix exists for standard-depth reports.
+
+**State additions:**
+
+```python
+report_critic_result: Optional[dict]
+report_critic_passed: bool
+```
+
+**Config:**
+
+```python
+enable_report_critic: bool = field(default_factory=lambda: os.getenv("ENABLE_REPORT_CRITIC", "true").lower() not in {"0", "false", "no"})
+```
+
+**Routing policy:**
+
+- Insert `report_critic` after `composer` in `app/agent.py`.
+- Add `report_critic` to MCP progress maps and `STAGE_LABELS`.
+- Start with critic as post-composer QA. It writes `report_critic_result` and `report_critic_passed`; it may append a short QA summary to the report, but should not discard useful reports.
+- Define hard failures narrowly: no final report, no citations at all in standard mode, or missing all required blueprint sections. Other issues complete with `report_critic_passed=False` and a QA summary.
+- Do not add a composer regeneration loop in the first version. Regeneration can come later if the critic produces stable, actionable fixes.
+
+**Tests first:**
+
+- `test_report_critic_fails_missing_required_section`
+- `test_report_critic_fails_uncited_major_claim`
+- `test_report_critic_flags_unresolved_contradiction`
+- `test_report_critic_passes_complete_cited_report`
+- `test_graph_runs_report_critic_after_composer_when_enabled`
+- `test_report_critic_can_be_disabled_by_config`
+- `test_mcp_status_includes_report_critic_result`
+- `test_report_critic_stage_label_is_exposed_in_tasks_api`
+
+**Acceptance criteria:**
+
+- Standard reports include a short final QA summary or metadata record.
+- Missing required sections and uncited major claims are caught in tests.
+- Existing reports still complete if critic is disabled.
+
+---
+
+### Phase 6 — Missing-evidence register and sufficiency-driven re-planning
+
+**Objective:** Stop passively saying “data missing”; actively decide whether missing evidence should trigger more research or weaken the recommendation.
+
+**Files:**
+- Modify: `app/nodes/evaluator.py`
+- Modify: `app/nodes/enhancer.py`
+- Modify: `app/nodes/researcher.py`
+- Modify: `app/models.py`
+- Test: `tests/test_agent.py`
+- Test: `tests/test_integration.py`
+
+**Sufficiency model:**
+
+```python
+class SufficiencyAssessment(BaseModel):
+    information_sufficient: bool
+    blocking_gaps: list[str] = Field(default_factory=list)
+    follow_up_queries: list[str] = Field(default_factory=list)
+    recommendation_strength: str = "medium"  # high, medium, low, no_recommendation
+```
+
+**Routing policy:**
+
+- If evidence gaps are non-blocking: continue, disclose them.
+- If gaps affect the main recommendation and iterations remain: route to enhancer with targeted queries.
+- If gaps remain after max iterations: continue but downgrade recommendation strength and disclose why.
+- Update the existing circuit breaker carefully: blocking blueprint-required gaps may override score-stagnation only while iterations remain; after max iterations, do not loop forever.
+
+**Deferral note:** This phase should not start until Phases 1, 2, 4, and 5 are stable. Sufficiency routing depends on trustworthy blueprint/evidence state.
+
+**Tests first:**
+
+- `test_evaluator_marks_missing_comparator_data_as_blocking_when_required_by_blueprint`
+- `test_enhancer_receives_gap_specific_followup_queries`
+- `test_report_downgrades_recommendation_when_blocking_gap_remains_after_max_iterations`
+
+**Acceptance criteria:**
+
+- Missing required evidence becomes a structured register.
+- The agent either researches the gap or explicitly downgrades confidence/recommendation strength.
+
+---
+
+### Phase 7 — Simple budgets and model routing
+
+**Objective:** Add cost discipline without complex scheduling.
+
+**Files:**
+- Modify: `app/config.py`
+- Modify: `app/state.py`
+- Modify: `app/nodes/researcher.py`
+- Modify: `app/tokens.py`
+- Test: `tests/test_agent.py`
+
+**Config additions:**
+
+Use env-backed `field(default_factory=...)` values, matching the current `ResearchConfig` pattern:
+
+```python
+max_sources_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_SOURCES_PER_GOAL", "8")))
+max_queries_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_QUERIES_PER_GOAL", "5")))
+max_findings_chars_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_FINDINGS_CHARS_PER_GOAL", "12000")))
+critic_model: str  # already exists; ensure report critic uses it
+```
+
+Add validation bounds so invalid env values fail clearly instead of crashing mid-run.
+
+**Policy:**
+
+- Worker model: planning, research summarization, composition.
+- Critic model: evaluator and final report critic.
+- Deterministic functions: source scoring, evidence appendix assembly, simple template selection.
+
+**Tests first:**
+
+- `test_researcher_respects_max_queries_per_goal`
+- `test_researcher_caps_sources_per_goal`
+- `test_report_critic_uses_critic_model_not_worker_model`
+
+**Acceptance criteria:**
+
+- Budgets are visible in config and respected by researcher.
+- No sophisticated scheduler added.
+
+---
+
+### Phase 8 — Runtime, dashboard, and docs integration
+
+**Objective:** Preserve existing MCP/dashboard behavior while exposing new report quality metadata.
+
+**Files:**
+- Modify: `app/mcp_server.py`
+- Modify: `README.md`
+- Modify: `AGENTS.md`
+- Modify: `ARCHITECTURE.md`
+- Modify: `ROADMAP.md`
+- Test: `tests/test_mcp_server.py`
+
+**MCP/dashboard additions:**
+
+- Include `template`, `audience`, and `report_critic_passed` in task metadata.
+- Show report QA status in dashboard task card.
+- Keep `/tasks` sanitized; do not expose absolute paths.
+- Keep `/download` path traversal guard.
+
+**Tests first:**
+
+- `test_tasks_endpoint_includes_report_template_and_qa_status`
+- `test_research_status_includes_report_critic_summary_when_available`
+- `test_dashboard_renders_quality_status_without_exposing_paths`
+
+**Acceptance criteria:**
+
+- Existing MCP clients still work.
+- Dashboard surfaces the new metadata without breaking current UI.
+- Docs explain templates, evidence appendix, and critic behavior.
+
+---
+
+### Verification plan
+
+Run after each phase:
+
+```bash
+cd /home/jorge/Documents/projects/deep-research-langgraph
+.venv/bin/python -m pytest tests/ -q
+git diff --check
+```
+
+Run before merging/pushing implementation:
+
+```bash
+cd /home/jorge/Documents/projects/deep-research-langgraph
+.venv/bin/python -m pytest tests/ -q
+docker build -t deep-research-agent .
+bash deploy.sh start
+curl -sf http://localhost:8100/health
+curl -sf http://localhost:8100/ready
+curl -sf http://localhost:8100/tasks
+```
+
+Manual smoke tests before final commit:
+
+1. Run a retail-investor-style topic and verify it uses decision-support sections.
+2. Run an architecture-improvement topic and verify it uses architecture-review sections.
+3. Verify standard reports include evidence appendix and critic QA metadata.
+4. Verify brief reports stay concise.
+5. Verify dashboard still loads and report downloads still work.
+6. Run one direct graph smoke test with `report_critic` enabled and disabled.
+7. Run one MCP smoke test and verify `research_status` includes template and critic metadata.
+
+### Implementation order and commit boundaries
+
+Treat this as a roadmap, not one giant implementation batch.
+
+| Milestone | Scope | Stop condition |
+|---|---|---|
+| A | Phases 1, 2, and minimal Phase 4 | Blueprint + deterministic evidence appendix + template headings work; no report critic failure behavior yet |
+| B | Phase 5 | Final critic records QA metadata and surfaces it through MCP/dashboard; hard failures narrowly defined |
+| C | Phases 3, 6, 7, 8 | Source scoring, sufficiency routing, budgets, and dashboard polish after evidence state is stable |
+
+Suggested commit boundaries inside those milestones:
+
+| Commit | Scope |
+|---|---|
+| 1 | Add blueprint models, state fields, planner fallback, tests |
+| 2 | Add evidence models/extraction/source appendix, tests |
+| 3 | Add source scoring, tests |
+| 4 | Add component-based composer templates, tests |
+| 5 | Add final report critic node, graph routing, tests |
+| 6 | Add sufficiency/gap-driven enhancer routing, tests |
+| 7 | Add simple budgets/model routing, tests |
+| 8 | Add MCP/dashboard/docs integration, deploy verification |
+
+### Self-critique of this plan
+
+| Finding | Impact | Adjustment |
+|---|---|---|
+| The highest-risk part is adding too much schema at once. | Could slow implementation and create brittle LLM JSON parsing. | Use deterministic fallback and keep `report_sections`/string findings compatible until each phase is proven. |
+| A composer regeneration loop after final critic sounds attractive but is premature. | Could create unstable loops and higher cost. | First version only audits and exposes failures; regeneration can be a later phase. |
+| Source scoring can become fake rigor if numeric scores are over-precise. | Users may over-trust arbitrary weights. | Treat scores as ordering heuristics, not final truth. Expose source tier/type/reason, not only number. |
+| Claim extraction from prose is hard. | LLM extraction could hallucinate structured claims. | First implementation uses existing confidence tags, citations, contradiction markers, and gap language. Add LLM extraction only after deterministic path works. |
+| Template selection can misclassify ambiguous topics. | Wrong report shape harms output. | Keep template override possible later; use conservative fallback to generic report. |
+| More appendices can make reports bloated. | User experience may worsen for brief/simple topics. | Evidence appendix only for `standard` depth; brief mode remains short. |
+| Dashboard metadata changes can leak paths or internals. | Security regression risk. | Keep existing sanitization tests and add explicit tests for new fields. |
+| Retail/legal templates may imply domain expertise beyond current search pipeline. | Legal/policy and financial outputs may be over-trusted. | For v1, templates are presentation and audit structures, not guarantees of legal/financial-grade analysis. Domain-specific critic rules can come later. |
+
+### Final priority recommendation
+
+Start with Phases 1, 2, 4, and 5. They deliver the visible product jump: audience-aware report structure, evidence appendix, decision-support components, and final report QA.
+
+Defer Phases 6 and 7 until the evidence model is stable. Adaptive re-planning and budgets are valuable, but they depend on the blueprint/evidence layer being trustworthy first.
+
 ## Next — Polish
 
 ### Better model defaults

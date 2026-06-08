@@ -371,6 +371,62 @@ Before calling the critic LLM, a rule-based pre-check catches obvious pass/fail 
 
 Saves API calls and latency for common cases. When `ENABLE_EVALUATOR=false`, all evaluations auto-PASS.
 
+
+## Target Architecture — Evidence-Structured Reports
+
+The next major improvement is not a new agent framework. It is a clearer separation between planning, evidence, composition, and QA.
+
+```mermaid
+flowchart TB
+    Topic["Raw topic"] --> Enrich["Topic enrichment<br/>domain, audience, ambiguity"]
+    Enrich --> Blueprint["Report blueprint planner<br/>template, sections, evidence needs"]
+    Blueprint --> Research["Parallel researchers<br/>queries aligned to evidence needs"]
+    Research --> Score["Source scoring<br/>authority, relevance, recency, diversity"]
+    Score --> Evidence["Evidence normalization<br/>claims, sources, gaps, contradictions"]
+    Evidence --> Refine["Existing refinement subgraph<br/>deliverable/evaluator/enhancer"]
+    Refine --> Compose["Component composer<br/>template-specific report blocks"]
+    Compose --> Critic["Final report critic<br/>section, citation, contradiction, gap audit"]
+    Critic --> Report["Markdown report<br/>inline citations + evidence appendix + QA summary"]
+```
+
+### New core objects
+
+| Object | Stored in | Purpose |
+|---|---|---|
+| `ReportBlueprint` | `state.report_blueprint` | Audience, decision context, template, sections, required tables/scenarios/artifacts, source requirements |
+| `EvidenceSource` | canonical `state.sources` register | Source metadata, authority tier, source type, claim coverage. Existing `Citation` / `CitationSource` wrappers remain boundary adapters during migration. |
+| `EvidenceClaim` | `state.evidence_claims` | Major claims with confidence and supporting/contradicting sources |
+| `EvidenceGap` | `state.evidence_gaps` | Missing evidence, why it matters, attempted queries, impact on conclusion |
+| `Contradiction` | `state.contradictions` | Conflicting claims and resolution status |
+| `ReportCriticResult` | `state.report_critic_result` | Final rendered-report QA verdict and fix list |
+
+### Template families
+
+| Template | When selected | Required blocks |
+|---|---|---|
+| `generic_research_report` | Default fallback | summary, body sections, themes, gaps, source quality, methodology |
+| `decision_memo` | Should we choose/build/adopt? | decision context, options, criteria, scenarios, recommendation |
+| `retail_investor_memo` | IPO/stock/investment question for retail audience | what is being offered, business economics, valuation scenarios, retail risks, checklist, recommendation |
+| `architecture_review` | System/agent/platform architecture question | current state, alternatives, tradeoffs, roadmap, implementation risks |
+| `compare_and_recommend` | Compare/rank/select questions | comparison matrix, scoring rationale, recommendation, caveats |
+| `legal_policy_brief` | Law/regulation/jurisdiction-specific question | question presented, authority hierarchy, controlling sources, ambiguity, practical answer |
+
+### Why this architecture
+
+- It preserves the existing LangGraph/MCP runtime.
+- It makes report UX better without requiring more agents.
+- It gives the critic structured expectations to audit against.
+- It improves traceability: report prose is generated from an explicit evidence model.
+- It keeps markdown as canonical output while allowing better PDF/dashboard rendering later.
+
+### Deliberate constraints
+
+- `report_sections` remains for backward compatibility during migration.
+- Source IDs are allocated only at merge/global source-register boundaries using `url_to_short_id`; parallel workers must not define global IDs.
+- First claim/evidence extraction pass is deterministic; no LLM claim extractor until needed.
+- Final critic audits the report first; it does not automatically regenerate in v1.
+- Evidence appendix is standard-depth only; brief reports stay short.
+
 ## File Map
 
 ```
