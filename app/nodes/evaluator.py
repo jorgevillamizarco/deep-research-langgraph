@@ -202,6 +202,20 @@ _CONTRADICTION_POLARITY_PAIRS = [
     (r"\bbenefit\b", r"\b(?:no benefit|harm|worsen)\b"),
 ]
 
+_STOP_WORDS: set[str] = {
+    # Function words
+    "the", "and", "but", "for", "not", "that", "this", "with", "from",
+    "are", "was", "were", "have", "has", "had", "been", "can", "will",
+    "may", "could", "would", "should", "also", "more", "some", "than",
+    "into", "over", "only", "other", "such", "each", "both", "just",
+    "very", "much", "many", "most", "well", "its",
+    # LLM domain vocabulary (too generic to indicate topic overlap)
+    "llm", "llms", "model", "models", "agent", "agents", "agentic",
+    "data", "system", "systems", "based", "using", "used", "use",
+    "result", "results", "study", "studies", "found", "show", "shown",
+    "report", "reports", "research", "approach", "method",
+}
+
 
 def _words(text: str) -> set[str]:
     return {word for word in re.findall(r"[a-z]{3,}", text.lower())}
@@ -234,7 +248,7 @@ def _detect_contradictions(evidence_claims: list[dict]) -> list[str]:
                 if re.search(pos_pat, text_i) and re.search(neg_pat, text_j):
                     words_i = _words(text_i)
                     words_j = _words(text_j)
-                    overlap = words_i & words_j
+                    overlap = (words_i & words_j) - _STOP_WORDS
                     if len(overlap) >= 3:
                         contradictions.append(
                             f"High-confidence contradiction between {claim_i.get('claim_id', '?')} "
@@ -245,7 +259,7 @@ def _detect_contradictions(evidence_claims: list[dict]) -> list[str]:
                 if re.search(neg_pat, text_i) and re.search(pos_pat, text_j):
                     words_i = _words(text_i)
                     words_j = _words(text_j)
-                    overlap = words_i & words_j
+                    overlap = (words_i & words_j) - _STOP_WORDS
                     if len(overlap) >= 3:
                         contradictions.append(
                             f"High-confidence contradiction between {claim_i.get('claim_id', '?')} "

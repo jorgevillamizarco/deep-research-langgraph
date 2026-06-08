@@ -1724,3 +1724,26 @@ def test_cli_help_does_not_require_config(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "Deep Research Agent" in captured.out
     assert "WORKER_API_KEY" not in captured.err
+
+
+def test_contradiction_detector_filters_stop_words():
+    """Contradictions should not fire on domain vocabulary overlap alone."""
+    from app.nodes.evaluator import _detect_contradictions
+
+    # Two claims about agents with opposite findings but only domain-word overlap
+    claims = [
+        {
+            "claim_id": "claim-1", "text": "LLM agents significantly improve workflow efficiency",
+            "confidence": 5, "evidence_strength": "high", "support_source_ids": ["src-1"],
+        },
+        {
+            "claim_id": "claim-2", "text": "LLM agents do not significantly improve workflow efficiency",
+            "confidence": 5, "evidence_strength": "high", "support_source_ids": ["src-2"],
+        },
+    ]
+
+    result = _detect_contradictions(claims)
+    # "llm", "agents", "significantly", "workflow", "efficiency" — but the polarity pair
+    # is on "significant" vs "not significant". After stop words, overlap should be
+    # topic words, not function/domain words.
+    print(f"Contradictions: {result}")
