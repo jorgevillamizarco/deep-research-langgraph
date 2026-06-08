@@ -137,6 +137,7 @@ def _append_final_qa(report: str, critic_result: dict, sufficiency: dict | None)
     sufficiency = sufficiency or {}
     status = "PASS" if not critic_result.get("hard_failures") else "FAIL"
     warnings = critic_result.get("warnings") or []
+    hard_failures = critic_result.get("hard_failures") or []
     missing_sections = critic_result.get("missing_sections") or []
     missing_artifacts = critic_result.get("missing_artifacts") or []
     blocking_gaps = sufficiency.get("blocking_gaps") or []
@@ -173,6 +174,8 @@ def _append_final_qa(report: str, critic_result: dict, sufficiency: dict | None)
         lines.append(f"- Contradictions: {'; '.join(contradictions)}")
     if warnings:
         lines.append(f"- Warnings: {'; '.join(warnings)}")
+    if hard_failures:
+        lines.append(f"- Failures: {'; '.join(hard_failures)}")
     return report_body + "\n" + "\n".join(lines) + "\n"
 
 
