@@ -57,6 +57,7 @@ STAGE_LABELS: dict[str, str] = {
     "merge_findings": "Synthesizing search findings",
     "refinement_loop": "Refining with deeper research (Phase 2)",
     "composer": "Writing the final report",
+    "report_critic": "Running final report QA",
     "saving": "Saving report to disk",
     "saving_pdf": "Generating PDF",
     "error": "Error",
@@ -325,12 +326,15 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         initial_state = {
             "topic": topic, "plan_approved": True, "user_feedback": None,
             "research_plan": None, "report_sections": None,
+            "report_blueprint": None,
             "section_research_findings": None, "research_evaluation": None,
             "current_goal": "", "parallel_goals": [], "parallel_findings": [],
             "research_iteration": 0, "iteration_count": 0,
             "max_iterations": max_iterations,
             "url_to_short_id": {}, "sources": {},
+            "evidence_claims": [], "evidence_gaps": [],
             "final_cited_report": None, "final_report_with_citations": None,
+            "report_critic_result": None, "report_critic_passed": False,
             "messages": [], "errors": [], "evaluation_scores": [],
             "total_tokens": 0, "cached_goal_count": 0,
             "depth": depth,
@@ -342,6 +346,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
         plan_result = generate_plan_only(topic)
         initial_state["research_plan"] = plan_result["research_plan"]
         initial_state["report_sections"] = plan_result["report_sections"]
+        initial_state["report_blueprint"] = plan_result.get("report_blueprint")
         initial_state["parallel_goals"] = plan_result["parallel_goals"]
         initial_state["plan_approved"] = True
         if plan_result.get("total_tokens"):
@@ -357,10 +362,13 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
             "merge_findings": 0.45,
             "refinement_loop": 0.65,
             "composer": 0.85,
+            "report_critic": 0.93,
             "__end__": 1.0,
         }
 
         report = ""
+        report_critic_result = None
+        report_critic_passed = False
         for event in graph.stream(initial_state, thread_config):
             for node_name in event:
                 if node_name in node_progress:
@@ -373,6 +381,10 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
                         rpt = node_data.get("final_report_with_citations") or node_data.get("final_cited_report") or ""
                         if rpt:
                             report = rpt
+                        if "report_critic_result" in node_data:
+                            report_critic_result = node_data.get("report_critic_result")
+                        if "report_critic_passed" in node_data:
+                            report_critic_passed = bool(node_data.get("report_critic_passed"))
 
         if not report:
             err_text = "No report was generated. Check logs for details."
@@ -411,6 +423,9 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
             task["report_path"] = str(filename)
             task["pdf_path"] = str(pdf_path) if pdf_path else None
             task["char_count"] = len(report)
+            task["report_critic_result"] = report_critic_result
+            task["report_critic_passed"] = report_critic_passed
+            task["stage"] = "report_critic"
             task["completed_at"] = time.time()
             _persist_task(task)
 
@@ -538,12 +553,14 @@ Poll again in 10-15 seconds."""
 
     elif status == "completed":
         report = task.get("report", "")
+        qa_status = "pass" if task.get("report_critic_passed") else "fail"
         return [types.TextContent(
             type="text",
             text=f"""## Research Complete
 
 **Task ID:** {task_id}
 **Topic:** {task.get("topic", "")}
+**Report QA:** {qa_status}
 **Report saved:** {task.get("report_path", "")}
 **PDF:** {task.get("pdf_path") or "not generated"}
 **Size:** {task.get("char_count", 0):,} chars
@@ -645,6 +662,8 @@ def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
         'has_pdf': bool(pdf_path),
         'pdf_filename': Path(pdf_path).name if pdf_path else '',
         'char_count': task.get('char_count', 0),
+        'report_critic_passed': task.get('report_critic_passed'),
+        'report_critic_result': task.get('report_critic_result'),
     }
 
 

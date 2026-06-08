@@ -41,6 +41,7 @@ from app.nodes import (
     deliverable_node,
     enhanced_search_executor_node,
     planner_node,
+    report_critic_node,
     research_evaluator_node,
     researcher_node,
 )
@@ -310,6 +311,7 @@ def build_research_graph(checkpointer=None):
     builder.add_node("merge_findings", merge_findings_node)
     builder.add_node("refinement_loop", refinement_subgraph)
     builder.add_node("composer", composer_node)
+    builder.add_node("report_critic", report_critic_node)
 
     # Conditional fan-out from planner: Send to parallel researchers
     builder.add_conditional_edges(
@@ -323,7 +325,8 @@ def build_research_graph(checkpointer=None):
     builder.add_edge("researcher", "merge_findings")
     builder.add_edge("merge_findings", "refinement_loop")
     builder.add_edge("refinement_loop", "composer")
-    builder.add_edge("composer", END)
+    builder.add_edge("composer", "report_critic")
+    builder.add_edge("report_critic", END)
 
     builder.set_entry_point("planner")
 

@@ -143,6 +143,7 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
             "user_feedback": None,
             "research_plan": None,
             "report_sections": None,
+            "report_blueprint": None,
             "section_research_findings": None,
             "research_evaluation": None,
             "current_goal": "",
@@ -153,8 +154,12 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
             "max_iterations": config.max_search_iterations,
             "url_to_short_id": {},
             "sources": {},
+            "evidence_claims": [],
+            "evidence_gaps": [],
             "final_cited_report": None,
             "final_report_with_citations": None,
+            "report_critic_result": None,
+            "report_critic_passed": False,
             "messages": [],
             "errors": [],
             "evaluation_scores": [],
@@ -184,6 +189,7 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
         plan_text = plan_result["research_plan"]
         sections_text = plan_result["report_sections"]
         parallel_goals = plan_result["parallel_goals"]
+        report_blueprint = plan_result.get("report_blueprint")
         total_tokens_val = plan_result.get("total_tokens", 0)
 
         # Interactive: show plan, get approval/feedback (loop until approved)
@@ -206,11 +212,13 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
                 plan_text = plan_result["research_plan"]
                 sections_text = plan_result["report_sections"]
                 parallel_goals = plan_result["parallel_goals"]
+                report_blueprint = plan_result.get("report_blueprint")
                 total_tokens_val += plan_result.get("total_tokens", 0)
 
         # ── Phase 1-3: Run graph with approved plan ──
         initial_state["research_plan"] = plan_text
         initial_state["report_sections"] = sections_text
+        initial_state["report_blueprint"] = report_blueprint
         initial_state["parallel_goals"] = parallel_goals
         initial_state["plan_approved"] = True
         initial_state["total_tokens"] = total_tokens_val

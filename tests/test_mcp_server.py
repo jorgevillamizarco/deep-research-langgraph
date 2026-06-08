@@ -49,6 +49,9 @@ def test_tasks_api_includes_persisted_tasks(tmp_path, monkeypatch):
         "progress": 1.0,
         "created_at": 1000,
         "completed_at": 1100,
+        "stage": "report_critic",
+        "report_critic_passed": False,
+        "report_critic_result": {"hard_failures": [], "warnings": ["low confidence claims"]},
         "report_path": str(report_path),
         "char_count": 8,
     }))
@@ -65,6 +68,9 @@ def test_tasks_api_includes_persisted_tasks(tmp_path, monkeypatch):
     persisted = next(task for task in tasks if task["task_id"] == "research-persisted123")
     assert persisted["has_report"] is True
     assert persisted["report_filename"] == "report_test.md"
+    assert persisted["stage"] == "Running final report QA"
+    assert persisted["report_critic_passed"] is False
+    assert persisted["report_critic_result"]["warnings"] == ["low confidence claims"]
     assert "report_path" not in persisted
     assert "pdf_path" not in persisted
 

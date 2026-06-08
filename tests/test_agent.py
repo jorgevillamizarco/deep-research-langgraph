@@ -528,6 +528,121 @@ def test_template_block_config_uses_retail_investor_sections():
     assert "decision_checklist" in blocks
 
 
+def test_report_critic_fails_missing_required_section():
+    """Report critic should fail when blueprint-required sections are missing."""
+    from app.nodes.report_critic import report_critic_node
+
+    state: ResearchState = {
+        "topic": "Should I invest in SpaceX?",
+        "plan_approved": True,
+        "research_plan": "plan",
+        "report_sections": "## Executive Summary\n## Recommendation",
+        "report_blueprint": {
+            "template": "retail_investor_memo",
+            "sections": [
+                {"title": "Executive Summary", "purpose": "summary"},
+                {"title": "What Is Being Decided", "purpose": "decision framing"},
+                {"title": "Recommendation", "purpose": "decision"},
+            ],
+            "required_decision_artifacts": ["decision_checklist"],
+        },
+        "section_research_findings": "findings",
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [],
+        "final_cited_report": "# Report\n\n## Executive Summary\nAnswer.\n\n## Recommendation\nBuy.",
+        "final_report_with_citations": "# Report\n\n## Executive Summary\nAnswer.\n\n## Recommendation\nBuy.",
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    result = report_critic_node(state)
+
+    assert result["report_critic_passed"] is False
+    assert "What Is Being Decided" in "\n".join(result["report_critic_result"]["hard_failures"])
+
+
+def test_report_critic_passes_complete_cited_report():
+    """Report critic should pass a complete cited report and append QA summary."""
+    from app.nodes.report_critic import report_critic_node
+
+    report = """# Report
+
+## Executive Summary
+SpaceX remains private and any retail exposure would likely be indirect. [src-1]
+
+## What Is Being Decided
+Whether a retail investor should seek pre-IPO exposure. [src-1]
+
+## Recommendation
+Wait for audited public disclosures before taking indirect exposure.
+
+## Evidence Appendix
+| Source | Tier |
+|---|---:|
+| src-1 | 1 |
+"""
+    state: ResearchState = {
+        "topic": "Should I invest in SpaceX?",
+        "plan_approved": True,
+        "research_plan": "plan",
+        "report_sections": "## Executive Summary\n## What Is Being Decided\n## Recommendation",
+        "report_blueprint": {
+            "template": "retail_investor_memo",
+            "sections": [
+                {"title": "Executive Summary", "purpose": "summary"},
+                {"title": "What Is Being Decided", "purpose": "decision framing"},
+                {"title": "Recommendation", "purpose": "decision"},
+            ],
+            "required_decision_artifacts": [],
+        },
+        "section_research_findings": "findings",
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {"https://example.com": "src-1"},
+        "sources": {"src-1": {"short_id": "src-1", "title": "Example", "url": "https://example.com", "tier": 1}},
+        "evidence_claims": [],
+        "evidence_gaps": [],
+        "final_cited_report": report,
+        "final_report_with_citations": report,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    result = report_critic_node(state)
+
+    assert result["report_critic_passed"] is True
+    assert result["report_critic_result"]["hard_failures"] == []
+    assert "## Final QA" in result["final_report_with_citations"]
+
+
 def test_rule_based_evaluation_clear_pass():
     """Rule-based pre-check returns PASS for substantial, cited, structured findings."""
     from app.nodes.evaluator import _rule_based_evaluation

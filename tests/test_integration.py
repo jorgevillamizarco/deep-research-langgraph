@@ -144,6 +144,7 @@ def test_full_pipeline_with_mocked_llm():
     - Refinement loop evaluates and passes
     - Composer generates cited report
     - Report has markdown links (not <cite> tags)
+    - Report critic runs after composer and records QA metadata
     """
     from app.agent import build_research_graph
     from app.tools import search as search_module
@@ -233,6 +234,12 @@ def test_full_pipeline_with_mocked_llm():
     assert any("langchain" in u or "github" in u or "blog" in u for u in urls), (
         f"Expected research URLs in sources, got: {urls}"
     )
+
+    # Verify report critic ran and produced QA metadata
+    assert "report_critic_passed" in result
+    assert "report_critic_result" in result
+    assert result["report_critic_passed"] is True
+    assert "## Final QA" in result["final_report_with_citations"]
 
     print(f"\nIntegration test passed:")
     print(f"  LLM calls: {fake_llm.call_log}")

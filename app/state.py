@@ -127,11 +127,15 @@ class ResearchState(TypedDict):
 
     # ── Phase 3: Report ──
     final_cited_report: Optional[str]
-    """Report with <cite source='src-N'/> tags."""
+    """Final report with raw <cite> tags from the composer."""
     final_report_with_citations: Optional[str]
-    """Final report with markdown citation links."""
+    """Final report with markdown citations (and optional QA summary)."""
+    report_critic_result: Optional[dict]
+    """Final report QA metadata from the post-composer critic."""
+    report_critic_passed: bool
+    """Whether the final report passed the post-composer QA checks."""
 
-    # ── Execution metadata ──
+    # ── Runtime / orchestration ──
     messages: list
     """Conversation history for LLM calls."""
     iteration_count: int
