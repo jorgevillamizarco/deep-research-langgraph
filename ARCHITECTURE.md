@@ -480,3 +480,5 @@ deep-research-langgraph/
 ├── ROADMAP.md                # Technical debt + future features
 └── README.md
 ```
+
+| **Contradiction detection fix** | Moved from evaluator (Phase 1) to report critic (Phase 2 post-composition). The evaluator ran before evidence_claims were extracted by the composer — detector was scanning an empty list. Now runs after claim extraction with real data. First confirmed fire: 5 contradictions detected on Vitamin D / COVID-19 topic. |

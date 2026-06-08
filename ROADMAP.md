@@ -1050,3 +1050,13 @@ All P1 and P2 tasks completed across 4 commits. P3 (polish) deferred — contrad
 - Live test: research completes without total failure on rate-limited runs (graceful degradation proven)
 - Live test: 0 duplicate source warnings (dedup prevention proven)
 - 83+ tests passing
+
+### Contradiction Detection Fix — 2026-06-08
+
+**Root cause:** Detector ran in evaluator (Phase 1) but evidence_claims are extracted by composer (Phase 2). Empty list, zero firings.
+
+**Fix:** Move to report_critic_node after claim extraction from report body. First live test on Vitamin D/COVID-19 topic detected 5 contradictions between 3 sources making opposing mortality-effect claims.
+
+### P3 Polish Complete
+
+Claim text now: strips connector words (and, but, however), capitalizes first letter, truncates at word boundaries (not mid-word), strips leading punctuation and markdown formatting.

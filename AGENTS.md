@@ -279,7 +279,7 @@ Five quality-control features work together to produce grounded, self-critical r
 |---------|------|-----------|
 | **Report Blueprint** | planner → all | Structured report template with required sections, evidence requirements, and template-specific blocks. Propagated through state as `report_blueprint`. |
 | **Sufficiency Assessment** | evaluator | Checks if evidence gaps block the final recommendation. Produces `information_sufficient`, `blocking_gaps`, `recommendation_strength` (medium/low/no_recommendation), and targeted `follow_up_queries`. |
-| **Contradiction Detection** | evaluator | Compares high-confidence claims (>=4) from different sources. 7 polarity pairs. Blocking contradictions trigger re-research. |
+| **Contradiction Detection** | report_critic | Compares high-confidence claims from different sources after composition. 7 polarity pairs detect opposing claims (significant/not significant, effective/ineffective). Contradictions become hard_failures visible in Final QA. |
 | **Source Diversity** | evaluator | Unique domain count with www/port normalization. Returns low/medium/high. Non-blocking. |
 | **Report Critic** | report_critic | Post-composer QA: structural checks, duplicate source detection, semantic QA via LLM. Appends *## Final QA* with status, strength, diversity, warnings. |
 | **Recommendation Constraints** | report_critic | When blocking gaps remain and strength is low/no_recommendation, appends *## Recommendation Constraints* with explicit missing-evidence disclosure. |
@@ -306,5 +306,14 @@ Five quality-control features work together to produce grounded, self-critical r
 - `7c3d138` — Fix: claim extractor regex for `<cite src="N"/>` format
 - `2bb142f` — Test: red integration tests for quality-control hardening
 - `40867bf` — Fix: quality-control hardening (claim sanitization, source dedup, inline fallback, empty tables, model check, gap regex)
+- `6193a60` — Fix: render hard_failures in Final QA section
+- `89171b3` — Feat: graceful degradation on enhancer failure + source dedup prevention
+- `328bcef` — Feat: polish claim text (word-boundary truncation, strip connectors)
+- `0a9e34a` — Fix: deploy.sh to bypass Hermes API key redaction
+- `f9c08cf` — Fix: move contradiction detection to report critic (post-composition)
 
-### Test baseline: 83/83 passing
+### Test baseline: 86/86 passing
+
+### Deploy
+
+Use `bash deploy.sh` to rebuild and restart the container with the correct API key. Hermes tool redaction silently replaces keys with `***` in `docker run -e` commands — the script sources `.env` directly to bypass this.
