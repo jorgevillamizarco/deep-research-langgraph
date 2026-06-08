@@ -994,3 +994,24 @@ Three live runs surfaced the same failure pattern: **features passed unit tests 
 5. P2.1 — Contradiction detection integration test
 6. P3.1 — Polish claim text rendering
 7. Full test suite + live test + docs + commit + push
+
+### Hardening Complete — 2026-06-08
+
+All P1 and P2 tasks completed across 4 commits. P3 (polish) deferred — contradiction detection needs real trigger data.
+
+**Live test verification (run research-418f48ee7e77):**
+
+| Feature | Result |
+|---------|--------|
+| Major Claims table | Populated with clean claim text, zero `<cite>` tags |
+| Source deduplication | Zero duplicate source warnings (was 26-40) |
+| Empty table suppression | Empty sections omitted entirely |
+| Claim extraction | Two-pass: `<cite>` primary + inline URL fallback |
+| Semantic QA warnings | All real, no false positives |
+| Evidence gap filtering | Zero meta-commentary leakage |
+| Heading matching | Substring — no false "section missing" |
+| Artifact matching | Lenient fallback — no false "artifact missing" |
+| Section checking | Correctly identifies genuinely missing blueprint sections |
+| Test suite | 83/83 passing (6 new integration tests) |
+
+**Remaining:** P2.3 contradiction detection (needs trigger data), P3.1 claim text polish.

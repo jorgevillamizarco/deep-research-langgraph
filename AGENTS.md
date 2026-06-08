@@ -283,8 +283,11 @@ Five quality-control features work together to produce grounded, self-critical r
 | **Source Diversity** | evaluator | Unique domain count with www/port normalization. Returns low/medium/high. Non-blocking. |
 | **Report Critic** | report_critic | Post-composer QA: structural checks, duplicate source detection, semantic QA via LLM. Appends *## Final QA* with status, strength, diversity, warnings. |
 | **Recommendation Constraints** | report_critic | When blocking gaps remain and strength is low/no_recommendation, appends *## Recommendation Constraints* with explicit missing-evidence disclosure. |
-| **Claim Extraction** | composer | Scans `[src-N]` citations in report body for evidence appendix Major Claims table. |
-| **Evidence Gap Filtering** | enhancer, merge_findings | Excludes meta-commentary ("search results", "original evaluation") from gap extraction. |
+| **Claim Extraction** | composer | Two-pass: primary scans `<cite src="N"/>` and `[src-N]` tags, fallback scans inline markdown links `[text](url)`. Sanitizes claim text (strips tags, headers, formatting). |
+| **Evidence Gap Filtering** | enhancer, merge_findings | Excludes 8 meta-commentary patterns from gap extraction ("search results", "original evaluation", "deficiencies identified", "synthesis incorporates", "impact on previous findings", etc.). |
+| **Source Deduplication** | composer | Deduplicates source register by URL before rendering appendix, with citation ID remapping. |
+| **Empty Table Suppression** | composer | Omits Major Claims and Missing Evidence sections when no data exists. |
+| **Critic Model Check** | report_critic | Warns when CRITIC_MODEL == WORKER_MODEL (inflated QA scores). |
 | **Iterative Repair Routing** | agent | Blocking gaps → enhancer. Stagnation detection exits with downgraded recommendation. Max iterations as hard cap. |
 
 ### State fields added
@@ -298,6 +301,10 @@ Five quality-control features work together to produce grounded, self-critical r
 - `f7c5219` — Milestone C+D: Sufficiency-driven refinement controls
 - `5d9f0cb` — Contradiction detection + source diversity scoring
 - `01512ae` — Duplicate source detection in critic
-- `8c00eba` — Claim extraction, gap filter, hardened semantic QA prompt
+- `8c00eba` — Claim extraction, gap filter, hardened semantic QA
+- `8841670` — Fix: claim ordering, substring heading/artifact matching
+- `7c3d138` — Fix: claim extractor regex for `<cite src="N"/>` format
+- `2bb142f` — Test: red integration tests for quality-control hardening
+- `40867bf` — Fix: quality-control hardening (claim sanitization, source dedup, inline fallback, empty tables, model check, gap regex)
 
-### Test baseline: 77/77 passing
+### Test baseline: 83/83 passing
