@@ -234,6 +234,17 @@ def report_critic_node(state: ResearchState) -> dict:
         dup_warnings = _detect_duplicate_sources(report)
         warnings.extend(dup_warnings)
 
+    # Contradiction detection: extract claims from report, check for opposing ones
+    try:
+        from app.nodes.composer import _extract_claims_from_report
+        from app.nodes.evaluator import _detect_contradictions
+        extracted_claims = _extract_claims_from_report(report, sources)
+        contradictions = _detect_contradictions(extracted_claims)
+        if contradictions:
+            hard_failures.extend([f"Contradiction: {c}" for c in contradictions])
+    except Exception:
+        pass  # contradiction detection is best-effort
+
     semantic_warnings, semantic_failures, token_delta = _run_semantic_qa(report, report_blueprint, sufficiency)
     warnings.extend(semantic_warnings)
     hard_failures.extend(semantic_failures)
