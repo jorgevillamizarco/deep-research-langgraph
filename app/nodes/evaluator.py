@@ -214,6 +214,9 @@ _STOP_WORDS: set[str] = {
     "data", "system", "systems", "based", "using", "used", "use",
     "result", "results", "study", "studies", "found", "show", "shown",
     "report", "reports", "research", "approach", "method",
+    # URL / domain fragments (leak from citation URLs into claim text)
+    "com", "org", "io", "dev", "net", "https", "http", "www",
+    "docs", "oss", "github", "langchain", "langgraph",
 }
 
 
