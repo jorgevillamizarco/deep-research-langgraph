@@ -217,6 +217,9 @@ _STOP_WORDS: set[str] = {
     # URL / domain fragments (leak from citation URLs into claim text)
     "com", "org", "io", "dev", "net", "https", "http", "www",
     "docs", "oss", "github", "langchain", "langgraph",
+    # Generic research / CS terms (appear in nearly every report)
+    "confidence", "node", "nodes", "level", "levels", "source",
+    "sources", "evidence", "finding", "findings", "claim", "claims",
 }
 
 
