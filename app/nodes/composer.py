@@ -104,103 +104,134 @@ def get_template_block_config(report_blueprint: dict | None) -> list[str]:
 def _extract_claims_from_report(report: str, sources: dict) -> list[dict]:
     """Extract structured claims from the report body for the Major Claims table.
 
-    Scans for sentences containing [src-N] citations and creates claim objects
-    with confidence derived from source tier.
+    Two-pass extraction:
+    1. Primary: <cite src="N"/> and [src-N] tags
+    2. Fallback: inline markdown links [text](url) when primary yields < 3 claims
     """
     claims: list[dict] = []
     seen_texts: set[str] = set()
 
+    def _sanitize(text: str) -> str:
+        """Strip cite tags, markdown headers, and formatting from claim text."""
+        text = re.sub(r"<cite[^>]*/?>", "", text)
+        text = re.sub(r"^#{1,4}\s+", "", text)
+        text = re.sub(r"^[-*]\s+", "", text)
+        text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > 200:
+            text = text[:197] + "..."
+        return text
+
+    def _extract_sentence_around(report: str, pos: int) -> str:
+        before = report.rfind(". ", 0, pos)
+        before = report.rfind("! ", 0, pos) if report.rfind("! ", 0, pos) > before else before
+        before = report.rfind("? ", 0, pos) if report.rfind("? ", 0, pos) > before else before
+        before = report.rfind(".\n", 0, pos) if report.rfind(".\n", 0, pos) > before else before
+        start = before + 2 if before >= 0 else max(0, pos - 200)
+        after = report.find(". ", pos)
+        after_alt = report.find(".\n", pos)
+        if after_alt >= 0 and (after < 0 or after_alt < after):
+            after = after_alt
+        end = after + 1 if after >= 0 else min(len(report), pos + 200)
+        return report[start:end].strip()
+
+    # Pass 1: cite tags and [src-N] brackets
     for match in re.finditer(r"(?:\[src-(\d+)\]|<cite\s+(?:source=\"src-(\d+)\"|src=\"(\d+)\"))", report):
         src_num = match.group(1) or match.group(2) or match.group(3)
         src_id = f"src-{src_num}"
         src = sources.get(src_id, {})
         tier = src.get("tier", 3)
         if isinstance(tier, str):
-            try:
-                tier = int(tier)
-            except (ValueError, TypeError):
-                tier = 3
+            try: tier = int(tier)
+            except (ValueError, TypeError): tier = 3
         confidence = 5 if tier == 1 else 4 if tier == 2 else 3
-
-        pos = match.start()
-        before = report.rfind(". ", 0, pos)
-        before = report.rfind("! ", 0, pos) if report.rfind("! ", 0, pos) > before else before
-        before = report.rfind("? ", 0, pos) if report.rfind("? ", 0, pos) > before else before
-        before = report.rfind(".\n", 0, pos) if report.rfind(".\n", 0, pos) > before else before
-        start = before + 2 if before >= 0 else max(0, pos - 200)
-
-        after = report.find(". ", pos)
-        after_alt = report.find(".\n", pos)
-        if after_alt >= 0 and (after < 0 or after_alt < after):
-            after = after_alt
-        end = after + 1 if after >= 0 else min(len(report), pos + 200)
-
-        claim_text = report[start:end].strip()
-        claim_text = re.sub(r"\s+", " ", claim_text)[:200]
-
+        claim_text = _sanitize(_extract_sentence_around(report, match.start()))
+        if not claim_text or len(claim_text) < 20: continue
         if claim_text not in seen_texts:
             seen_texts.add(claim_text)
-            claims.append({
-                "claim_id": f"claim-{len(claims) + 1}",
-                "text": claim_text,
-                "confidence": confidence,
-                "support_source_ids": [src_id],
-                "evidence_strength": "high" if confidence >= 4 else "medium" if confidence == 3 else "low",
-            })
+            claims.append({"claim_id": f"claim-{len(claims) + 1}", "text": claim_text, "confidence": confidence, "support_source_ids": [src_id], "evidence_strength": "high" if confidence >= 4 else "medium" if confidence == 3 else "low"})
 
+    # Pass 2: inline markdown link fallback
+    if len(claims) < 3:
+        url_to_id: dict[str, str] = {}
+        for sid, src in sources.items():
+            url = (src or {}).get("url", "")
+            if url: url_to_id[url.rstrip("/")] = sid
+        for match in re.finditer(r"\[([^\]]+)\]\((https?://[^\)]+)\)", report):
+            url = match.group(2).rstrip("/")
+            src_id = url_to_id.get(url)
+            if not src_id: continue
+            src = sources.get(src_id, {})
+            tier = src.get("tier", 3)
+            if isinstance(tier, str):
+                try: tier = int(tier)
+                except (ValueError, TypeError): tier = 3
+            confidence = 5 if tier == 1 else 4 if tier == 2 else 3
+            claim_text = _sanitize(_extract_sentence_around(report, match.start()))
+            if not claim_text or len(claim_text) < 20: continue
+            if claim_text not in seen_texts:
+                seen_texts.add(claim_text)
+                claims.append({"claim_id": f"claim-{len(claims) + 1}", "text": claim_text, "confidence": confidence, "support_source_ids": [src_id], "evidence_strength": "high" if confidence >= 4 else "medium" if confidence == 3 else "low"})
     return claims
 
 
+
 def build_evidence_appendix(sources: dict, evidence_claims: list[dict] | None, evidence_gaps: list[dict] | None) -> str:
+    """Render a deterministic evidence appendix from state data.
+
+    Deduplicates sources by URL and suppresses empty tables.
+    """
     evidence_claims = evidence_claims or []
     evidence_gaps = evidence_gaps or []
-    if not sources and not evidence_claims and not evidence_gaps:
+
+    # Deduplicate sources by URL
+    seen_urls: set[str] = set()
+    deduped: dict = {}
+    id_remap: dict[str, str] = {}
+    for sid in sorted(sources.keys(), key=lambda k: int(k[4:]) if k[4:].isdigit() else 0):
+        src = sources[sid] or {}
+        url = src.get("url", "").rstrip("/")
+        if url and url in seen_urls:
+            for csid, csrc in deduped.items():
+                if (csrc or {}).get("url", "").rstrip("/") == url:
+                    id_remap[sid] = csid
+                    break
+            continue
+        if url: seen_urls.add(url)
+        deduped[sid] = src
+
+    if not deduped and not evidence_claims and not evidence_gaps:
         return ""
 
-    lines = [
-        "## Evidence Appendix",
-        "",
-        "### Source Register",
+    lines = ["## Evidence Appendix", "", "### Source Register",
         "| Source | Tier | Type | Used for | Notes |",
-        "|---|---:|---|---|---|",
-    ]
-    for sid, src in sorted(sources.items()):
-        lines.append(
-            "| {source} | {tier} | {source_type} | {used_for} | {notes} |".format(
-                source=f"{sid}: [{src.get('title', sid)}]({src.get('url', '')})",
-                tier=src.get("tier", "?"),
-                source_type=src.get("source_type", "unknown"),
-                used_for=", ".join(src.get("used_for_claims", [])) or "—",
-                notes=src.get("authority_reason", "") or "—",
-            )
-        )
+        "|---|---:|---|---|---|"]
+    for sid, src in sorted(deduped.items()):
+        lines.append("| {source} | {tier} | {source_type} | {used_for} | {notes} |".format(
+            source=f"{sid}: [{src.get('title', sid)}]({src.get('url', '')})",
+            tier=src.get("tier", "?"),
+            source_type=src.get("source_type", "unknown"),
+            used_for=", ".join(src.get("used_for_claims", [])) or "—",
+            notes=src.get("authority_reason", "") or "—"))
 
-    lines.extend([
-        "",
-        "### Major Claims",
-        "| Claim | Confidence | Evidence | Caveat |",
-        "|---|---:|---|---|",
-    ])
-    for claim in evidence_claims:
-        evidence_links = ", ".join(claim.get("support_source_ids", [])) or "—"
-        caveat = claim.get("evidence_strength", "")
-        lines.append(
-            f"| {claim.get('text', '')} | {claim.get('confidence', '?')} | {evidence_links} | {caveat or '—'} |"
-        )
+    if evidence_claims:
+        lines.extend(["", "### Major Claims",
+            "| Claim | Confidence | Evidence | Caveat |",
+            "|---|---:|---|---|"])
+        for claim in evidence_claims:
+            evidence_links = ", ".join(claim.get("support_source_ids", [])) or "—"
+            if id_remap:
+                remapped = [id_remap.get(s, s) for s in claim.get("support_source_ids", [])]
+                evidence_links = ", ".join(remapped) or "—"
+            lines.append(f"| {claim.get('text', '')} | {claim.get('confidence', '?')} | {evidence_links} | {claim.get('evidence_strength', '') or '—'} |")
 
-    lines.extend([
-        "",
-        "### Missing Evidence",
-        "| Gap | Why it matters | Impact |",
-        "|---|---|---|",
-    ])
-    for gap in evidence_gaps:
-        lines.append(
-            f"| {gap.get('description', '')} | {gap.get('why_it_matters', '') or '—'} | {gap.get('impact_on_conclusion', '') or '—'} |"
-        )
+    if evidence_gaps:
+        lines.extend(["", "### Missing Evidence",
+            "| Gap | Why it matters | Impact |", "|---|---|---|"])
+        for gap in evidence_gaps:
+            lines.append(f"| {gap.get('description', '')} | {gap.get('why_it_matters', '') or '—'} | {gap.get('impact_on_conclusion', '') or '—'} |")
 
     return "\n".join(lines)
-
 
 def _compose_section_outline(topic: str, report_blueprint: dict | None, sections: str) -> str:
     """Build the section guidance passed into the composer prompt."""

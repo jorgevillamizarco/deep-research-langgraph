@@ -210,6 +210,8 @@ def report_critic_node(state: ResearchState) -> dict:
 
     warnings: list[str] = []
     hard_failures: list[str] = []
+    if config.critic_model and config.worker_model and config.critic_model == config.worker_model:
+        warnings.append("Critic model equals worker model — QA quality may be inflated. Consider setting CRITIC_MODEL to a stronger model.")
     if not report.strip():
         hard_failures.append("No final report was generated")
     if missing_sections:

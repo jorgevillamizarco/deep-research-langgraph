@@ -56,7 +56,7 @@ _GAP_REGEX = re.compile(
 
 
 def _is_meta_commentary(text: str) -> bool:
-    return bool(re.search(r"(search results|original evaluation|previously missing|filling missing)", text, re.IGNORECASE))
+    return bool(re.search(r"(search results|original evaluation|previously missing|filling missing|deficiencies identified|addressed in|synthesis incorporates|impact on previous findings)", text, re.IGNORECASE))
 
 
 def _refresh_evidence_gaps(existing_gaps: list[dict], follow_ups: list, supplement: str) -> list[dict]:
