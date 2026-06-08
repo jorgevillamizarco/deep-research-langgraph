@@ -487,3 +487,146 @@ def test_brief_mode():
     print(f"\nBrief mode test passed:")
     print(f"  LLM calls: {fake_llm.call_log}")
     print(f"  Report: {len(report)} chars")
+
+
+# ── Quality-control integration tests with real LLM output patterns ──
+
+REALISTIC_REPORT_WITH_CITE_TAGS = """## Executive Summary
+This report analyzes agent debugging techniques <cite src="1" /> based on recent research.
+Key findings include tracing patterns <cite src="2" /> and observability methods.
+The evidence suggests structured logging <cite src="3" /> improves debugging speed by 40%.
+
+## Gaps & Uncertainties
+- AutoGen support is not documented <cite src="4" />.
+- The 40% improvement claim comes from a vendor source and is unverified.
+
+## Evidence Appendix
+### Source Register
+| src-1: [Tracing Guide](https://example.com/1) | 3 | guide | — | — |
+| src-2: [Observability Paper](https://example.com/2) | 1 | paper | — | arxiv |
+| src-3: [Logging Study](https://example.com/3) | 2 | blog | — | — |
+| src-4: [AutoGen Docs](https://example.com/4) | 3 | docs | — | — |
+| src-5: [Tracing Guide dup](https://example.com/1) | 3 | guide | — | duplicate of src-1 |
+"""
+
+REALISTIC_REPORT_WITH_INLINE_URLS = """## Executive Summary
+This report analyzes [agent debugging](https://example.com/1) based on recent research.
+Key findings include [tracing patterns](https://example.com/2) and observability methods.
+The evidence suggests [structured logging](https://example.com/3) improves debugging speed.
+
+## Evidence Appendix
+### Source Register
+| src-1: [Tracing Guide](https://example.com/1) | 3 | guide | — | — |
+| src-2: [Observability Paper](https://example.com/2) | 1 | paper | — | arxiv |
+| src-3: [Logging Study](https://example.com/3) | 2 | blog | — | — |
+"""
+
+
+def test_composer_extracts_claims_from_cite_tags():
+    """Claims should be extracted from <cite src=\"N\"/> tags in the report body."""
+    from app.nodes.composer import _extract_claims_from_report
+
+    sources = {
+        "src-1": {"tier": 3, "url": "https://example.com/1"},
+        "src-2": {"tier": 1, "url": "https://example.com/2"},
+        "src-3": {"tier": 2, "url": "https://example.com/3"},
+        "src-4": {"tier": 3, "url": "https://example.com/4"},
+        "src-5": {"tier": 3, "url": "https://example.com/1"},
+    }
+
+    claims = _extract_claims_from_report(REALISTIC_REPORT_WITH_CITE_TAGS, sources)
+    assert len(claims) >= 3, f"Expected at least 3 claims, got {len(claims)}"
+
+    # Verify claim text does NOT contain raw cite tags
+    for claim in claims:
+        text = claim.get("text", "")
+        assert "<cite" not in text, f"Claim text contains raw cite tag: {text[:80]}"
+        assert "###" not in text, f"Claim text contains markdown header: {text[:80]}"
+
+
+def test_composer_extracts_claims_from_inline_urls():
+    """Claims should be extracted from inline markdown links when no cite tags exist."""
+    from app.nodes.composer import _extract_claims_from_report
+
+    sources = {
+        "src-1": {"tier": 3, "url": "https://example.com/1"},
+        "src-2": {"tier": 1, "url": "https://example.com/2"},
+        "src-3": {"tier": 2, "url": "https://example.com/3"},
+    }
+
+    claims = _extract_claims_from_report(REALISTIC_REPORT_WITH_INLINE_URLS, sources)
+    assert len(claims) >= 1, f"Expected at least 1 claim from inline URLs, got {len(claims)}"
+
+
+def test_build_evidence_appendix_deduplicates_sources():
+    """Source Register should only show each URL once."""
+    from app.nodes.composer import build_evidence_appendix
+
+    sources = {
+        "src-1": {"tier": 3, "url": "https://example.com/1", "title": "First"},
+        "src-2": {"tier": 1, "url": "https://example.com/2", "title": "Second"},
+        "src-5": {"tier": 3, "url": "https://example.com/1", "title": "First Dup"},
+    }
+
+    appendix = build_evidence_appendix(sources, [], [])
+    # src-1's URL and src-5's URL are the same — should only appear once
+    count_url_1 = appendix.count("https://example.com/1")
+    assert count_url_1 <= 1, f"Duplicate URL appears {count_url_1} times in appendix"
+
+
+def test_build_evidence_appendix_suppresses_empty_tables():
+    """Empty Major Claims and Missing Evidence sections should be omitted."""
+    from app.nodes.composer import build_evidence_appendix
+
+    sources = {"src-1": {"tier": 3, "url": "https://example.com/1", "title": "Test"}}
+    appendix = build_evidence_appendix(sources, [], [])
+    assert "### Major Claims" not in appendix, "Empty Major Claims should be suppressed"
+    assert "### Missing Evidence" not in appendix, "Empty Missing Evidence should be suppressed"
+
+
+def test_report_critic_warns_on_model_equality():
+    """Critic should warn when CRITIC_MODEL equals WORKER_MODEL."""
+    import unittest.mock
+    from app.nodes.report_critic import report_critic_node
+
+    state = {
+        "final_report_with_citations": REALISTIC_REPORT_WITH_CITE_TAGS,
+        "report_blueprint": {"template": "generic_research_report", "sections": []},
+        "sufficiency_assessment": {"information_sufficient": True},
+        "sources": {"src-1": {"url": "https://x.com/1"}},
+        "depth": "standard",
+    }
+
+    with unittest.mock.patch("app.nodes.report_critic.config") as mock_config:
+        mock_config.enable_report_critic = True
+        mock_config.critic_model = "deepseek-v4-flash"
+        mock_config.worker_model = "deepseek-v4-flash"
+        result = report_critic_node(state)
+
+    warnings = result.get("report_critic_result", {}).get("warnings", [])
+    assert any("critic model" in w.lower() for w in warnings), \
+        f"Expected critic model warning, got: {warnings}"
+
+
+def test_evidence_gap_regex_excludes_meta_commentary():
+    """Gap extraction should not pick up refinement meta-commentary lines."""
+    from app.nodes.enhancer import _is_meta_commentary
+
+    meta_lines = [
+        "The following synthesis incorporates the new search results",
+        "to address the deficiencies identified in the original evaluation",
+        "### 3. Skill Composition and Dependency Handling (Previously Missing)",
+        "## 6. Updated Comparison Matrix (Filling Missing Cells)",
+        "Impact on previous findings: the SoK paper confirms the pattern",
+    ]
+
+    for line in meta_lines:
+        assert _is_meta_commentary(line), f"Should be flagged as meta-commentary: {line}"
+
+    real_gaps = [
+        "The 40% improvement claim comes from a vendor source and is unverified.",
+        "Evidence for AutoGen skill authoring could not be retrieved from available sources.",
+    ]
+
+    for line in real_gaps:
+        assert not _is_meta_commentary(line), f"Should NOT be flagged: {line}"

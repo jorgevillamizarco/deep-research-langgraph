@@ -896,3 +896,101 @@ Multiple research agents collaborating on a large topic. Planner distributes sub
 | `langgraph-agent-deployment/references/quality-patterns.md` | Numeric rubric, per-claim confidence, source tiers, contradiction detection, DELIVERABLE guarantee, error surface |
 | `langgraph-agent-deployment/references/pdf-generation.md` | Pandoc+weasyprint primary, Python fallback, Docker setup |
 | `multi-agent-orchestration/references/langgraph-pipeline-patterns.md` | Send API, subgraphs, iteration loops, circuit breaker, interrupt/resume, JSON prompting |
+
+## Quality Hardening — Post-Evaluation Improvements
+
+*Plan written 2026-06-08 after 3 live agent evaluations exposing 8 quality issues across the quality-control layer.*
+
+### Root Cause Analysis
+
+Three live runs surfaced the same failure pattern: **features passed unit tests but failed in production** because unit tests used synthetic data that didn't match real LLM output. The claim extractor regex matched `<cite source="src-1"/>` but the LLM generates `<cite src="1"/>`. Heading checks used exact set membership but real headings have descriptive suffixes. Evidence gap regex caught meta-commentary that only appears in refinement-loop output.
+
+**Core insight:** The test suite validates pipeline structure (does the graph compile? do nodes return state?) but doesn't validate quality-control behavior with real LLM output patterns. This is a testing gap, not a logic gap.
+
+### Priority Tiers
+
+| Priority | Criteria | Items |
+|----------|----------|-------|
+| **P1** — Shipping bugs | Fixes defective behavior visible in live output | Claim text quality, source dedup, claim extraction fallback, gap regex hardening |
+| **P2** — Verification gaps | Features that have never been proven to work in production | Contradiction detection test, integration tests with real output, critic model check |
+| **P3** — Polish | Works correctly but output quality degrades UX | Clean claim text rendering |
+
+### Task Breakdown
+
+#### P1.1 — Sanitize claim text in Major Claims table
+- **Problem:** Extracted claims include raw `<cite>` tags and markdown headers in the displayed text. Example: `"Introduction and Foundational Definitions ### 1.1 Defining AI Agents... <cite source=\"src-1\" />"`
+- **Fix:** `_extract_claims_from_report` should strip `<cite>` tags and markdown heading prefixes (`###`, `##`) from claim text before storing. Truncate to 200 chars with ellipsis.
+- **Files:** `app/nodes/composer.py`
+- **Test:** Extract claims from a report with `<cite>` tags, verify no angle brackets or heading markers in claim text.
+- **Stop condition:** Run on 3 live reports, verify all claim text is clean prose.
+
+#### P1.2 — Deduplicate sources in composer, not just warn
+- **Problem:** Every report has 17-40 duplicate source entries. The critic warns about them but doesn't fix them. The composer should deduplicate before building the appendix.
+- **Fix:** In `build_evidence_appendix`, deduplicate the sources dict by URL before rendering the Source Register. Keep the first occurrence of each URL and drop subsequent ones. Update `used_for_claims` references.
+- **Files:** `app/nodes/composer.py`
+- **Test:** Build appendix with sources dict containing duplicate URLs, verify deduplicated output.
+- **Stop condition:** Live test shows 0 duplicate source warnings.
+
+#### P1.3 — Claim extraction fallback for inline URL citations
+- **Problem:** If the LLM generates inline markdown links (`[Title](URL)`) instead of `<cite>` tags, the extractor finds zero claims. The post-mortem report had this exact failure mode.
+- **Fix:** Add a second extraction pass in `_extract_claims_from_report`: if the `<cite>`/`[src-N]` pass yields < 3 claims, scan for markdown links `[text](url)` and extract the surrounding text as backup claims. Map URLs to src-IDs using the sources dict.
+- **Files:** `app/nodes/composer.py`
+- **Test:** Extract claims from report with only inline URL citations (no `<cite>` tags), verify ≥1 claim found.
+- **Stop condition:** Post-mortem-style report with inline URLs produces populated Major Claims table.
+
+#### P1.4 — Harden evidence gap regex against additional meta-commentary patterns
+- **Problem:** The regex filter excludes "search results", "original evaluation", "previously missing", "filling missing" — but there may be other meta-commentary patterns from refinement passes.
+- **Fix:** Add exclusion patterns for: "Impact on previous findings", "deficiencies identified", "addressed in", "updated comparison", "synthesis incorporates". Test against the actual evidence_gaps from the live reports.
+- **Files:** `app/nodes/enhancer.py`, `app/agent.py` (merge_findings)
+- **Test:** Run gap extraction on the refinement-pass output that caused the original contamination, verify zero meta-commentary gaps.
+- **Stop condition:** Live test Missing Evidence table contains only real evidence gaps, zero refinement notes.
+
+#### P2.1 — Prove contradiction detection works with a real trigger case
+- **Problem:** Contradiction detection has never fired across 3 live runs. Either it works but real reports don't trigger it, or the evidence_claims format doesn't match what the detector expects.
+- **Fix:** Create a synthetic report with two high-confidence claims from different sources that directly oppose each other on the same topic. Run through the full pipeline and verify the contradiction appears in Final QA.
+- **Files:** `tests/test_integration.py` (add integration test), possibly `app/nodes/evaluator.py` if bugs found
+- **Test:** Integration test: feed two opposing claims through evaluator, verify contradiction in sufficiency_assessment.
+- **Stop condition:** Contradiction detection fires in at least one live or synthetic run, produces expected output in Final QA.
+
+#### P2.2 — Add integration tests exercising real LLM output patterns
+- **Problem:** Unit tests use synthetic state dicts that don't match real LLM output. Bugs like "regex doesn't match actual `<cite>` format" only surface in live testing.
+- **Fix:** Add 3 integration tests that run the composer with real-looking report text (from saved live reports, anonymized). Verify: Major Claims table populated, no duplicate sources, clean claim text, no meta-commentary in gaps.
+- **Files:** `tests/test_integration.py`
+- **Test:** Feed actual report text from a live run into compose + critic pipeline, verify all quality gates pass correctly.
+- **Stop condition:** All 3 saved reports produce correct quality output (no false FAIL, populated tables, real warnings).
+
+#### P2.3 — Warn when critic model equals worker model
+- **Problem:** If `CRITIC_MODEL` is the same as `WORKER_MODEL`, semantic QA quality degrades silently (LLMs grading their own output inflates scores).
+- **Fix:** In `report_critic_node`, compare `config.critic_model` to `config.worker_model`. If equal, add a warning: "Critic model equals worker model — QA quality may be inflated."
+- **Files:** `app/nodes/report_critic.py`
+- **Test:** Set CRITIC_MODEL=deepseek-v4-flash, WORKER_MODEL=deepseek-v4-flash, verify warning in Final QA.
+- **Stop condition:** Warning appears when models match, absent when they differ.
+
+#### P3.1 — Polish claim text rendering
+- **Problem:** Claim text starts mid-sentence or includes formatting artifacts from markdown parsing.
+- **Fix:** After extracting claim text, strip leading punctuation/conjunctions ("- ", "* ", "**"), trim to sentence boundaries, cap at 200 chars with "..." only if truncated mid-word.
+- **Files:** `app/nodes/composer.py`
+- **Test:** Extract claims from reports with bullet lists, bold headers, verify clean prose output.
+- **Stop condition:** 3 live reports show consistently clean, readable claim text.
+
+### Plan Self-Critique
+
+**Risk: Source dedup breaks citation references.** P1.2 deduplicates the sources dict by URL, keeping the first src-N and dropping duplicates. But report body citations use the original src-IDs. If src-5 is a duplicate of src-1, dropping src-5 means any `<cite src="5"/>` in the report body won't resolve. Mitigation: build a remapping dict (`old_id → canonical_id`) and rewrite citation references in the report body. Test: after dedup, every `<cite>` tag in the report resolves to an existing source.
+
+**Gap: No "empty table suppression" task.** The critic warns about empty Major Claims and Missing Evidence tables. The fix shouldn't just populate them — it should also suppress them entirely when there's no data. Add P1.5: `build_evidence_appendix` omits Major Claims and Missing Evidence sections when their data lists are empty (not just the whole appendix).
+
+**Gap: Semantic QA prompt doesn't explicitly catch "arbitrary percentage as production note."** Our prompt mentions "unsupported quantitative claims" generally. The "20% optional parameters" and "3-5 core tasks" patterns should be called out explicitly as examples since they recur. Add to P1 task: update semantic QA prompt with concrete examples of this failure pattern.
+
+**Ordering efficiency:** P1.1, P1.2, P1.3, and P1.5 all touch `app/nodes/composer.py`. Implement them together in one pass to avoid merge conflicts and redundant test runs.
+
+**Testing strategy:** P2.2 (integration tests with real output) should be implemented FIRST — before P1 fixes — to establish a baseline. The integration tests should fail initially (proving they catch the bugs), then pass after P1 fixes. This follows TDD: red tests from real output patterns, then fix.
+
+### Revised Execution Order
+
+1. P2.2 — Write integration tests with real LLM output (RED — should fail)
+2. P1.1 + P1.2 + P1.3 + P1.5 — Fix composer (claim sanitization, source dedup with ID remapping, inline citation fallback, empty table suppression)
+3. P1.4 — Harden evidence gap regex
+4. P2.3 — Critic model equality check
+5. P2.1 — Contradiction detection integration test
+6. P3.1 — Polish claim text rendering
+7. Full test suite + live test + docs + commit + push
