@@ -47,6 +47,26 @@ def _heading_present(title: str, headings: set[str]) -> bool:
     return any(lowered in h for h in headings)
 
 
+def _section_content_present(title: str, report_lowered: str) -> bool:
+    """Check if report body contains content about the section topic.
+
+    Uses keyword presence rather than heading strings — LLMs vary
+    heading wording, so 'State Management Strategies' may appear as
+    '## 2. State Management' in the actual report.
+    """
+    stop = {"the", "and", "for", "with", "that", "this", "from", "are", "was",
+            "were", "have", "has", "had", "been", "can", "will", "may", "could",
+            "would", "should", "also", "more", "some", "than", "into", "over",
+            "only", "other", "such", "both", "just", "its", "use", "using", 
+            "based", "versus", "approaches", "patterns", "framework", "analysis",
+            "comparative", "deployment", "strategies", "execution", "backends"}
+    words = [w for w in re.findall(r"[a-z]{3,}", title.lower()) if w not in stop]
+    if len(words) < 2:
+        return title.lower() in report_lowered
+    matches = sum(1 for w in words if w in report_lowered)
+    return matches >= min(2, len(words))
+
+
 def _artifact_label_map() -> dict[str, str]:
     return {
         "decision_checklist": "Decision Checklist",
@@ -194,13 +214,15 @@ def report_critic_node(state: ResearchState) -> dict:
     depth = state.get("depth", "standard")
 
     required_sections = _extract_required_section_titles(report_blueprint)
-    present_headings = _extract_heading_titles(report)
-    missing_sections = [title for title in required_sections if not _heading_present(title, present_headings)]
+    lowered_report = report.lower()
+    missing_sections = [
+        title for title in required_sections
+        if not _section_content_present(title, lowered_report)
+    ]
 
     required_artifacts = list(report_blueprint.get("required_decision_artifacts") or [])
     artifact_labels = _artifact_label_map()
     missing_artifacts = []
-    lowered_report = report.lower()
     for artifact in required_artifacts:
         artifact_label = artifact_labels.get(str(artifact), str(artifact).replace("_", " ").title())
         if artifact_label.lower() in lowered_report:
