@@ -328,6 +328,7 @@ def _deep_research_runner(task_id: str, topic: str, max_iterations: int, depth: 
             "research_plan": None, "report_sections": None,
             "report_blueprint": None,
             "section_research_findings": None, "research_evaluation": None,
+            "sufficiency_assessment": None,
             "current_goal": "", "parallel_goals": [], "parallel_findings": [],
             "research_iteration": 0, "iteration_count": 0,
             "max_iterations": max_iterations,

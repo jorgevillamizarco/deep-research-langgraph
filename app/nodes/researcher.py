@@ -75,6 +75,7 @@ Return ONLY a JSON array of strings, one query per item. Example:
 
     # Parse the queries (handle both JSON and list-like text responses)
     queries = _parse_queries(query_response.content)
+    queries = queries[: config.max_queries_per_goal]
 
     if not queries:
         logger.warning("No search queries generated for goal: %s", goal[:80])
@@ -88,16 +89,16 @@ Return ONLY a JSON array of strings, one query per item. Example:
             search_results.append(format_search_results(query, results))
             for r in results[:2]:  # collect top 2 URLs per query for deep fetch
                 url = r.get("url", "")
-                if url and url not in all_urls:
+                if url and url not in all_urls and len(all_urls) < config.max_sources_per_goal:
                     all_urls.append(url)
         except Exception as e:
             logger.warning("Search failed for query %r: %s", query, e)
             search_results.append(f"### Search Results: {query}\nSearch failed: {e}\n")
 
     # Step 2b: Fetch full content from top URLs with browser for the #1 result
-    # HTTP for all 3 (fast), browser with link-following for the first (deep)
+    # HTTP for the configured source budget (fast), browser with link-following for the first (deep)
     fetched_content = []
-    for i, url in enumerate(all_urls[:3]):
+    for i, url in enumerate(all_urls[: config.max_sources_per_goal]):
         content = fetch_url_content(url, max_chars=5000)
         if content:
             fetched_content.append(f"## Source: {url}\n\n{content}\n")
@@ -139,6 +140,8 @@ TAG EVERY CLAIM. Do not skip the confidence tag on any factual statement."""
     ])
 
     summary = synthesis.content.strip()
+    if len(summary) > config.max_findings_chars_per_goal:
+        summary = summary[: config.max_findings_chars_per_goal].rstrip() + "\n\n[Truncated to fit per-goal findings budget.]"
 
     # Step 3b: Verification pass — cross-check findings with targeted search
     verification_note = _verify_findings(goal, summary, search_tool, target_lang)

@@ -33,6 +33,10 @@ class ResearchConfig:
     critic_api_base: str = field(default_factory=lambda: os.getenv("CRITIC_API_BASE", ""))
     output_dir: str = field(default_factory=lambda: os.getenv("RESEARCH_OUTPUT_DIR", os.path.expanduser("~/research/agent-results")))
     enable_evaluator: bool = field(default_factory=lambda: os.getenv("ENABLE_EVALUATOR", "true").lower() not in ("false", "0", "no", ""))
+    enable_report_critic: bool = field(default_factory=lambda: os.getenv("ENABLE_REPORT_CRITIC", "true").lower() not in ("false", "0", "no", ""))
+    max_sources_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_SOURCES_PER_GOAL", "8")))
+    max_queries_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_QUERIES_PER_GOAL", "5")))
+    max_findings_chars_per_goal: int = field(default_factory=lambda: int(os.getenv("MAX_FINDINGS_CHARS_PER_GOAL", "12000")))
     fallback_api_key: str = field(default_factory=lambda: os.getenv("FALLBACK_API_KEY", ""))
     fallback_api_base: str = field(default_factory=lambda: os.getenv("FALLBACK_API_BASE", ""))
     fallback_model: str = field(default_factory=lambda: os.getenv("FALLBACK_MODEL", ""))
@@ -70,6 +74,21 @@ class ResearchConfig:
             issues.append(
                 f"MAX_SEARCH_ITERATIONS={self.max_search_iterations} is high. "
                 "Consider capping at 5-10 to avoid runaway API costs."
+            )
+
+        if self.max_sources_per_goal < 1:
+            issues.append(
+                f"MAX_SOURCES_PER_GOAL={self.max_sources_per_goal} is too low. Must be at least 1."
+            )
+
+        if self.max_queries_per_goal < 1:
+            issues.append(
+                f"MAX_QUERIES_PER_GOAL={self.max_queries_per_goal} is too low. Must be at least 1."
+            )
+
+        if self.max_findings_chars_per_goal < 1000:
+            issues.append(
+                f"MAX_FINDINGS_CHARS_PER_GOAL={self.max_findings_chars_per_goal} is too low. Must be at least 1000."
             )
 
         # Warning: critic same as worker

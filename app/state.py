@@ -9,6 +9,10 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Literal, Optional, TypedDict
 
+
+def replace_list(_old, new):
+    return new
+
 from pydantic import BaseModel, Field
 
 
@@ -114,6 +118,8 @@ class ResearchState(TypedDict):
     # ── Evaluation ──
     research_evaluation: Optional[Feedback]
     """Latest structured evaluation result."""
+    sufficiency_assessment: Optional[dict]
+    """Serialized SufficiencyAssessment for gap-driven routing and report QA."""
 
     # ── Citation management (ADK-aligned) ──
     url_to_short_id: Annotated[dict, operator.or_]
@@ -122,8 +128,8 @@ class ResearchState(TypedDict):
     """short_id → CitationSource dict. Merged across calls."""
     evidence_claims: Annotated[list, operator.add]
     """Structured evidence claims extracted from findings."""
-    evidence_gaps: Annotated[list, operator.add]
-    """Missing-evidence records extracted from findings."""
+    evidence_gaps: Annotated[list, replace_list]
+    """Missing-evidence records extracted from findings; replacement semantics allow refinement passes to clear resolved gaps."""
 
     # ── Phase 3: Report ──
     final_cited_report: Optional[str]

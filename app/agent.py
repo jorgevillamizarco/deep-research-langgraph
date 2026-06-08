@@ -62,8 +62,17 @@ def route_after_evaluation(state: ResearchState):
     cycles (no improvement), force-exit to avoid wasted iterations.
     """
     evaluation = state.get("research_evaluation")
+    sufficiency = state.get("sufficiency_assessment") or {}
+    has_blocking_gaps = not sufficiency.get("information_sufficient", True)
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 5)
+
+    if has_blocking_gaps:
+        if sufficiency.get("recommendation_strength") == "no_recommendation":
+            return "pass"
+        if iteration_count >= max_iterations:
+            return "pass"
+        return "enhancer"
 
     if evaluation and evaluation.grade == "pass":
         return "pass"

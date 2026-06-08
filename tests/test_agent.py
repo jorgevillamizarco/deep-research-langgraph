@@ -1006,6 +1006,453 @@ def test_research_single_goal_passes_language_hint_to_search_backend():
     assert finding.citations[0].url == "https://example.com/fuente"
 
 
+def test_evaluator_marks_missing_comparator_data_as_blocking_when_required_by_blueprint():
+    """Blueprint-required evidence gaps should produce a blocking sufficiency assessment."""
+    from app.nodes.evaluator import research_evaluator_node
+    from app.state import Feedback
+    import unittest.mock
+
+    state: ResearchState = {
+        "topic": "Should we buy Nvidia?",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": "## Recommendation",
+        "report_blueprint": {
+            "template": "retail_investor_memo",
+            "sections": [
+                {
+                    "title": "Recommendation",
+                    "purpose": "decision",
+                    "required_evidence": ["comparator data"],
+                }
+            ],
+        },
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "Well cited findings with https://example.com/data and benchmark numbers for 2024.",
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [{
+            "gap_id": "gap-1",
+            "description": "Missing comparator data for AMD and Intel peer valuation.",
+            "why_it_matters": "Without peer comparison the investment recommendation may be overstated.",
+            "impact_on_conclusion": "high",
+        }],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    with unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=Feedback(grade="pass", comment="Looks fine.", follow_up_queries=[])):
+        result = research_evaluator_node(state)
+
+    assessment = result["sufficiency_assessment"]
+    assert assessment["information_sufficient"] is False
+    assert assessment["blocking_gaps"] == ["Missing comparator data for AMD and Intel peer valuation."]
+    assert assessment["recommendation_strength"] == "low"
+    assert any("Nvidia" in q and "peer valuation" in q for q in assessment["follow_up_queries"])
+
+
+def test_route_after_evaluation_keeps_researching_blocking_gaps_until_terminal_downgrade():
+    from app.agent import route_after_evaluation
+
+    state: ResearchState = {
+        "topic": "test",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": None,
+        "report_sections": None,
+        "report_blueprint": None,
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": None,
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "sufficiency_assessment": {
+            "information_sufficient": False,
+            "blocking_gaps": ["Missing comparator set"],
+            "follow_up_queries": ["test comparator set"],
+            "recommendation_strength": "low",
+        },
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 1,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [
+            {"iteration": 0, "source_quality": 4, "claim_verification": 4, "completeness": 4},
+            {"iteration": 1, "source_quality": 4, "claim_verification": 4, "completeness": 4},
+        ],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    assert route_after_evaluation(state) == "enhancer"
+
+    sufficiency = state["sufficiency_assessment"]
+    assert sufficiency is not None
+    sufficiency["recommendation_strength"] = "no_recommendation"
+    assert route_after_evaluation(state) == "pass"
+
+
+
+def test_enhancer_receives_gap_specific_followup_queries():
+    """Enhancer should prefer sufficiency-driven follow-up queries over generic evaluator ones."""
+    from app.nodes.enhancer import enhanced_search_executor_node
+    from app.state import Feedback
+    import unittest.mock
+
+    class FakeSearchTool:
+        def __init__(self):
+            self.queries = []
+
+        def invoke(self, params):
+            self.queries.append(params["query"])
+            return [{"title": "Peer comps", "url": "https://example.com/peer-comps", "snippet": "valuation table"}]
+
+    class FakeLLM:
+        def invoke(self, messages):
+            return type("Resp", (), {"content": "Supplementary peer comparison. [Source](https://example.com/peer-comps)"})()
+
+        def token_delta(self):
+            return {"total_tokens": 10}
+
+    search_tool = FakeSearchTool()
+    state: ResearchState = {
+        "topic": "Should we buy Nvidia?",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": None,
+        "report_blueprint": None,
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "Initial findings",
+        "research_iteration": 0,
+        "research_evaluation": Feedback(
+            grade="fail",
+            comment="Need comparator data.",
+            follow_up_queries=[{"search_query": "generic fallback query"}],
+        ),
+        "sufficiency_assessment": {
+            "information_sufficient": False,
+            "blocking_gaps": ["Missing comparator data"],
+            "follow_up_queries": ["Nvidia AMD Intel valuation comparison 2024"],
+            "recommendation_strength": "low",
+        },
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [{
+            "gap_id": "gap-1",
+            "description": "Missing comparator data for AMD and Intel peer valuation.",
+            "why_it_matters": "Peer comparison is required for the decision.",
+            "impact_on_conclusion": "high",
+        }],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    with (
+        unittest.mock.patch("app.nodes.enhancer.get_search_tool", return_value=search_tool),
+        unittest.mock.patch("app.nodes.enhancer._get_llm", return_value=FakeLLM()),
+    ):
+        result = enhanced_search_executor_node(state)
+
+    assert search_tool.queries == ["Nvidia AMD Intel valuation comparison 2024"]
+    assert result["evidence_gaps"] == []
+
+
+def test_enhancer_keeps_gap_when_followup_lacks_positive_evidence():
+    from app.nodes.enhancer import enhanced_search_executor_node
+    from app.state import Feedback
+    import unittest.mock
+
+    class FakeSearchTool:
+        def invoke(self, params):
+            return [{"title": "Weak note", "url": "https://example.com/note", "snippet": "commentary"}]
+
+    class FakeLLM:
+        def invoke(self, messages):
+            return type("Resp", (), {"content": "Supplementary commentary without hard evidence."})()
+
+        def token_delta(self):
+            return {"total_tokens": 5}
+
+    state: ResearchState = {
+        "topic": "Should we buy Nvidia?",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": None,
+        "report_blueprint": None,
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "Initial findings",
+        "research_iteration": 0,
+        "research_evaluation": Feedback(grade="fail", comment="Need comparator data.", follow_up_queries=[]),
+        "sufficiency_assessment": {
+            "information_sufficient": False,
+            "blocking_gaps": ["Missing comparator data"],
+            "follow_up_queries": ["Nvidia AMD Intel valuation comparison 2024"],
+            "recommendation_strength": "low",
+        },
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [{
+            "gap_id": "gap-1",
+            "description": "Missing comparator data for AMD and Intel peer valuation.",
+            "why_it_matters": "Peer comparison is required for the decision.",
+            "impact_on_conclusion": "high",
+        }],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    with (
+        unittest.mock.patch("app.nodes.enhancer.get_search_tool", return_value=FakeSearchTool()),
+        unittest.mock.patch("app.nodes.enhancer._get_llm", return_value=FakeLLM()),
+    ):
+        result = enhanced_search_executor_node(state)
+
+    assert len(result["evidence_gaps"]) == 1
+    assert result["evidence_gaps"][0]["description"] == "Missing comparator data for AMD and Intel peer valuation."
+
+
+
+def test_report_downgrades_recommendation_when_blocking_gap_remains_after_max_iterations():
+    """Final QA should disclose downgraded recommendation strength when blocking gaps remain."""
+    from app.nodes.report_critic import report_critic_node
+
+    state: ResearchState = {
+        "topic": "Should we buy Nvidia?",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": "## Recommendation",
+        "report_blueprint": {
+            "template": "retail_investor_memo",
+            "sections": [{"title": "Recommendation", "purpose": "decision"}],
+            "required_decision_artifacts": [],
+        },
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "findings",
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "sufficiency_assessment": {
+            "information_sufficient": False,
+            "blocking_gaps": ["Missing comparator data for peer valuation."],
+            "follow_up_queries": [],
+            "recommendation_strength": "no_recommendation",
+        },
+        "url_to_short_id": {"https://example.com": "src-1"},
+        "sources": {"src-1": {"short_id": "src-1", "title": "Example", "url": "https://example.com", "tier": 1}},
+        "evidence_claims": [],
+        "evidence_gaps": [{"description": "Missing comparator data for peer valuation.", "why_it_matters": "Peer context missing", "impact_on_conclusion": "high"}],
+        "final_cited_report": "# Report\n\n## Recommendation\nBuy now. [src-1]\n\n## Evidence Appendix\nready",
+        "final_report_with_citations": "# Report\n\n## Recommendation\nBuy now. [src-1]\n\n## Evidence Appendix\nready",
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 3,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    result = report_critic_node(state)
+
+    assert "## Recommendation Constraints" in result["final_report_with_citations"]
+    assert "Do not make a decisive recommendation yet." in result["final_report_with_citations"]
+    assert "Recommendation strength: no_recommendation" in result["final_report_with_citations"]
+    assert "Missing comparator data for peer valuation." in result["final_report_with_citations"]
+
+
+
+def test_researcher_respects_max_queries_per_goal(monkeypatch):
+    """Single-goal research should cap generated queries using config budget."""
+    from app.nodes.researcher import _research_single_goal
+    import app.nodes.researcher as researcher
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return type("Resp", (), {"content": '["q1", "q2", "q3", "q4"]'})()
+            return type("Resp", (), {"content": "Finding with [Source](https://example.com/a). [CONFIDENCE:4]"})()
+
+    class FakeSearchTool:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, params):
+            self.calls.append(params["query"])
+            return [{"title": "A", "url": f"https://example.com/{params['query']}", "snippet": "body"}]
+
+    monkeypatch.setattr(researcher.config, "max_queries_per_goal", 2)
+    monkeypatch.setattr(researcher, "fetch_url_content", lambda *args, **kwargs: "content")
+
+    search_tool = FakeSearchTool()
+    _research_single_goal("Test goal", search_tool, FakeLLM())
+
+    assert search_tool.calls == ["q1", "q2"]
+
+
+
+def test_researcher_caps_sources_per_goal(monkeypatch):
+    """Researcher should not deep-fetch more than the configured source budget."""
+    from app.nodes.researcher import _research_single_goal
+    import app.nodes.researcher as researcher
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def invoke(self, messages):
+            self.calls += 1
+            if self.calls == 1:
+                return type("Resp", (), {"content": '["q1", "q2"]'})()
+            return type("Resp", (), {"content": "Finding with [Source](https://example.com/a). [CONFIDENCE:4]"})()
+
+    class FakeSearchTool:
+        def invoke(self, params):
+            return [
+                {"title": "A", "url": "https://example.com/a", "snippet": "body"},
+                {"title": "B", "url": "https://example.com/b", "snippet": "body"},
+                {"title": "C", "url": "https://example.com/c", "snippet": "body"},
+            ]
+
+    fetched = []
+    monkeypatch.setattr(researcher.config, "max_sources_per_goal", 2)
+    monkeypatch.setattr(researcher, "fetch_url_content", lambda url, max_chars=5000: fetched.append(url) or "content")
+
+    _research_single_goal("Test goal", FakeSearchTool(), FakeLLM())
+
+    assert fetched == ["https://example.com/a", "https://example.com/b"]
+
+
+
+def test_report_critic_uses_critic_model_not_worker_model(monkeypatch):
+    """Final report critic should instantiate the critic model, not the worker model."""
+    from app.nodes.report_critic import report_critic_node
+    import app.nodes.report_critic as report_critic
+
+    class FakeLLM:
+        def invoke(self, messages):
+            return type("Resp", (), {"content": '{"warnings": [], "hard_failures": []}'})()
+
+        def token_delta(self):
+            return {"total_tokens": 1}
+
+    calls = {}
+
+    def fake_get_llm(model, api_key=None, base_url=None, temperature=0.2, node_name=""):
+        calls["model"] = model
+        calls["node_name"] = node_name
+        return FakeLLM()
+
+    monkeypatch.setattr(report_critic.config, "critic_model", "critic-model-x")
+    monkeypatch.setattr(report_critic.config, "worker_model", "worker-model-y")
+    monkeypatch.setattr("app.tokens.get_llm", fake_get_llm)
+
+    state: ResearchState = {
+        "topic": "Test",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": "## Recommendation",
+        "report_blueprint": {"sections": [{"title": "Recommendation", "purpose": "decision"}]},
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "findings",
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "sufficiency_assessment": None,
+        "url_to_short_id": {},
+        "sources": {},
+        "evidence_claims": [],
+        "evidence_gaps": [],
+        "final_cited_report": "# Report\n\n## Recommendation\nHold.",
+        "final_report_with_citations": "# Report\n\n## Recommendation\nHold.",
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    report_critic_node(state)
+
+    assert calls == {"model": "critic-model-x", "node_name": "report_critic"}
+
+
+
 def test_cli_help_does_not_require_config(monkeypatch, capsys):
     """CLI --help should print usage without requiring API env vars."""
     import app.cli as cli

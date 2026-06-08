@@ -14,6 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import config
+from app.models import SufficiencyAssessment
 from app.state import Feedback, ResearchState, SearchQuery
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,94 @@ def _rule_based_evaluation(findings: str, topic: str) -> Feedback | None:
     return None
 
 
+def _collect_required_evidence(report_blueprint: dict | None) -> list[str]:
+    blueprint = report_blueprint or {}
+    required = [str(item).strip() for item in blueprint.get("source_requirements", []) if str(item).strip()]
+    for section in blueprint.get("sections", []):
+        for item in (section or {}).get("required_evidence", []):
+            item_text = str(item).strip()
+            if item_text:
+                required.append(item_text)
+    return required
+
+
+def _gap_matches_requirement(gap_description: str, requirement: str) -> bool:
+    gap_words = {word for word in re.findall(r"[a-z0-9]+", gap_description.lower()) if len(word) > 2}
+    requirement_words = {word for word in re.findall(r"[a-z0-9]+", requirement.lower()) if len(word) > 2}
+    if not gap_words or not requirement_words:
+        return False
+    return requirement.lower() in gap_description.lower() or requirement_words.issubset(gap_words)
+
+
+def _build_follow_up_query(topic: str, gap_description: str) -> str:
+    cleaned_gap = re.sub(r"^(missing|no|lack of)\s+", "", gap_description.strip(), flags=re.IGNORECASE)
+    cleaned_gap = cleaned_gap.rstrip(".")
+    return f"{topic} {cleaned_gap}".strip()
+
+
+def _assess_sufficiency(state: ResearchState) -> SufficiencyAssessment:
+    evidence_gaps = state.get("evidence_gaps", []) or []
+    required_evidence = _collect_required_evidence(state.get("report_blueprint"))
+
+    blocking_gaps: list[str] = []
+    for gap in evidence_gaps:
+        description = str((gap or {}).get("description", "")).strip()
+        if not description:
+            continue
+        impact = str((gap or {}).get("impact_on_conclusion", "")).strip().lower()
+        if any(_gap_matches_requirement(description, requirement) for requirement in required_evidence) or impact in {"high", "blocking", "critical"}:
+            blocking_gaps.append(description)
+
+    blocking_gaps = list(dict.fromkeys(blocking_gaps))
+    if not blocking_gaps:
+        return SufficiencyAssessment(information_sufficient=True)
+
+    recommendation_strength = "low"
+    scores = state.get("evaluation_scores", []) or []
+    if len(scores) >= 2:
+        def _total(score: dict) -> int:
+            return score.get("source_quality", 0) + score.get("claim_verification", 0) + score.get("completeness", 0)
+        last_two = sorted(scores, key=lambda score: score.get("iteration", 0))[-2:]
+        if _total(last_two[0]) >= _total(last_two[1]):
+            recommendation_strength = "no_recommendation"
+    if state.get("iteration_count", 0) >= state.get("max_iterations", 5):
+        recommendation_strength = "no_recommendation"
+
+    follow_up_queries = [_build_follow_up_query(state.get("topic", ""), gap) for gap in blocking_gaps]
+    follow_up_queries = [query for query in dict.fromkeys(follow_up_queries) if query]
+    return SufficiencyAssessment(
+        information_sufficient=False,
+        blocking_gaps=blocking_gaps,
+        follow_up_queries=follow_up_queries,
+        recommendation_strength=recommendation_strength,
+    )
+
+
+def _apply_sufficiency_policy(state: ResearchState, evaluation: Feedback) -> tuple[Feedback, SufficiencyAssessment]:
+    assessment = _assess_sufficiency(state)
+    if assessment.information_sufficient:
+        return evaluation, assessment
+
+    if state.get("iteration_count", 0) < state.get("max_iterations", 5):
+        return (
+            Feedback(
+                grade="fail",
+                comment=f"{evaluation.comment} Blocking evidence gaps remain: {'; '.join(assessment.blocking_gaps)}.",
+                follow_up_queries=[SearchQuery(search_query=query) for query in assessment.follow_up_queries],
+            ),
+            assessment,
+        )
+
+    return (
+        Feedback(
+            grade="pass",
+            comment=f"{evaluation.comment} Blocking evidence gaps remain after max iterations; downgrade recommendation strength and disclose why.",
+            follow_up_queries=None,
+        ),
+        assessment,
+    )
+
+
 def research_evaluator_node(state: ResearchState) -> dict:
     """Critique the research findings and produce a structured Feedback evaluation.
 
@@ -191,25 +280,32 @@ def research_evaluator_node(state: ResearchState) -> dict:
     if not config.enable_evaluator:
         logger.info("Evaluator disabled via ENABLE_EVALUATOR — auto-passing")
         print("  ⚠️  Evaluator disabled — auto-pass", flush=True)
-        return {
-            "research_evaluation": Feedback(
+        evaluation, assessment = _apply_sufficiency_policy(
+            state,
+            Feedback(
                 grade="pass",
                 comment="Evaluator disabled via configuration. Auto-pass.",
                 follow_up_queries=None,
-            )
+            ),
+        )
+        return {
+            "research_evaluation": evaluation,
+            "sufficiency_assessment": assessment.model_dump(),
         }
 
     # Rule-based pre-check: skip LLM for obvious cases
     pre_check = _rule_based_evaluation(findings, topic)
     if pre_check:
-        emoji = "✅" if pre_check.grade == "pass" else "❌"
+        evaluation, assessment = _apply_sufficiency_policy(state, pre_check)
+        emoji = "✅" if evaluation.grade == "pass" else "❌"
         source = "rule-based pre-check"
-        print(f"  {emoji} Evaluation ({source}): {pre_check.grade.upper()} — {pre_check.comment[:80]}", flush=True)
-        logger.info("Evaluator skipped LLM call — %s determined %s", source, pre_check.grade)
+        print(f"  {emoji} Evaluation ({source}): {evaluation.grade.upper()} — {evaluation.comment[:80]}", flush=True)
+        logger.info("Evaluator skipped LLM call — %s determined %s", source, evaluation.grade)
 
-        scores_entry = _extract_scores(pre_check.comment, state.get("iteration_count", 0))
+        scores_entry = _extract_scores(evaluation.comment, state.get("iteration_count", 0))
         return {
-            "research_evaluation": pre_check,
+            "research_evaluation": evaluation,
+            "sufficiency_assessment": assessment.model_dump(),
             "evaluation_scores": [scores_entry] if scores_entry else [],
         }
 
@@ -275,6 +371,7 @@ follow_up_queries MUST be null/empty if grade is "pass"."""
         evaluation = _parse_feedback_json(response.content)
 
         if evaluation:
+            evaluation, assessment = _apply_sufficiency_policy(state, evaluation)
             logger.info("Evaluation: %s — %s", evaluation.grade, evaluation.comment[:80])
 
             emoji = "✅" if evaluation.grade == "pass" else "❌"
@@ -285,6 +382,7 @@ follow_up_queries MUST be null/empty if grade is "pass"."""
 
             return {
                 "research_evaluation": evaluation,
+                "sufficiency_assessment": assessment.model_dump(),
                 "evaluation_scores": [scores_entry] if scores_entry else [],
                 **llm.token_delta(),
             }

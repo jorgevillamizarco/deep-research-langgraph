@@ -146,6 +146,7 @@ def run_research(topic: str, auto_approve: bool = False, generate_pdf: bool = Fa
             "report_blueprint": None,
             "section_research_findings": None,
             "research_evaluation": None,
+            "sufficiency_assessment": None,
             "current_goal": "",
             "parallel_goals": [],
             "parallel_findings": [],

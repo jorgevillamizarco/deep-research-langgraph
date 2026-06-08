@@ -45,6 +45,15 @@ class ReportBlueprint(BaseModel):
     confidence_policy: str = "State confidence for major claims and sections."
 
 
+class SufficiencyAssessment(BaseModel):
+    """Whether remaining evidence gaps are blocking for the final recommendation."""
+
+    information_sufficient: bool
+    blocking_gaps: list[str] = Field(default_factory=list)
+    follow_up_queries: list[str] = Field(default_factory=list)
+    recommendation_strength: str = "medium"
+
+
 class Citation(BaseModel):
     """A single cited source with quality metadata."""
 

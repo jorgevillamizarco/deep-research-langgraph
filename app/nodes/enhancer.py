@@ -8,6 +8,7 @@ with existing research, and collects new sources.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -28,6 +29,58 @@ def _get_llm() -> Any:
                    node_name="enhancer")
 
 
+def _word_set(text: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z0-9]+", text.lower()) if len(word) > 2}
+
+
+def _gap_matches_query(gap_description: str, query_text: str) -> bool:
+    gap_words = _word_set(gap_description)
+    query_words = _word_set(query_text)
+    if not gap_words or not query_words:
+        return False
+    return len(gap_words & query_words) >= 2
+
+
+def _has_missing_language(text: str) -> bool:
+    return bool(re.search(r"(?im)(not found|missing|could not retrieve|unconfirmed)", text))
+
+
+def _has_positive_evidence(text: str) -> bool:
+    return bool(re.search(r"\[[^\]]+\]\(https?://[^\)]+\)", text) or re.search(r"https?://\S+", text))
+
+
+def _refresh_evidence_gaps(existing_gaps: list[dict], follow_ups: list, supplement: str) -> list[dict]:
+    targeted_queries = []
+    for query in follow_ups:
+        if isinstance(query, str):
+            targeted_queries.append(query)
+        else:
+            targeted_queries.append(query.search_query if hasattr(query, "search_query") else str(query))
+
+    refreshed_gaps = []
+    for gap in existing_gaps:
+        description = str((gap or {}).get("description", "")).strip()
+        if not description:
+            continue
+        addressed = any(_gap_matches_query(description, query_text) for query_text in targeted_queries)
+        if addressed and supplement.strip() and _has_positive_evidence(supplement) and not _has_missing_language(supplement):
+            continue
+        refreshed_gaps.append(gap)
+
+    for match in re.finditer(r"(?im)^.*(not found|missing|could not retrieve|unconfirmed).*$", supplement):
+        description = match.group(0).strip()
+        if any(str((gap or {}).get("description", "")).strip() == description for gap in refreshed_gaps):
+            continue
+        refreshed_gaps.append({
+            "gap_id": f"gap-{len(refreshed_gaps) + 1}",
+            "description": description,
+            "why_it_matters": "This missing evidence weakens confidence in the conclusion.",
+            "impact_on_conclusion": "unknown",
+        })
+
+    return refreshed_gaps
+
+
 def enhanced_search_executor_node(state: ResearchState) -> dict:
     """Execute follow-up queries from the evaluator and merge with existing findings.
 
@@ -43,7 +96,13 @@ def enhanced_search_executor_node(state: ResearchState) -> dict:
             "iteration_count": state.get("iteration_count", 0) + 1,
         }
 
-    follow_ups = evaluation.follow_up_queries or []
+    follow_ups = []
+    sufficiency = state.get("sufficiency_assessment") or {}
+    targeted_queries = [str(query).strip() for query in sufficiency.get("follow_up_queries", []) if str(query).strip()]
+    if targeted_queries:
+        follow_ups = targeted_queries
+    else:
+        follow_ups = evaluation.follow_up_queries or []
     if not follow_ups:
         logger.info("No follow-up queries — skipping enhancement")
         return {
@@ -64,7 +123,10 @@ def enhanced_search_executor_node(state: ResearchState) -> dict:
     existing_count = len(state.get("url_to_short_id", {}))
 
     for query in follow_ups:
-        query_text = query.search_query if hasattr(query, "search_query") else str(query)
+        if isinstance(query, str):
+            query_text = query
+        else:
+            query_text = query.search_query if hasattr(query, "search_query") else str(query)
         try:
             results = search_tool.invoke({"query": query_text, "max_results": 5})
             formatted = format_search_results(query_text, results)
@@ -110,6 +172,7 @@ Cite sources with markdown links."""
 
     # Merge: append supplement to existing findings
     merged = f"{existing_findings}\n\n---\n\n## Supplementary Findings (Refinement Round {state.get('iteration_count', 0) + 1})\n\n{supplement}"
+    refreshed_gaps = _refresh_evidence_gaps(state.get("evidence_gaps", []) or [], follow_ups, supplement)
 
     # Merge sources
     merged_sources = {**state.get("sources", {}), **new_sources_merged}
@@ -122,6 +185,7 @@ Cite sources with markdown links."""
         "section_research_findings": merged,
         "sources": merged_sources,
         "url_to_short_id": merged_url_map,
+        "evidence_gaps": refreshed_gaps,
         "iteration_count": state.get("iteration_count", 0) + 1,
         **llm.token_delta(),
     }
