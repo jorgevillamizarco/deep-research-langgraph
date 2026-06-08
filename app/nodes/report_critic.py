@@ -96,7 +96,17 @@ def _run_semantic_qa(report: str, report_blueprint: dict, sufficiency: dict | No
                 "You are a final report critic. Return JSON only with keys "
                 "warnings (list of strings) and hard_failures (list of strings). "
                 "Only use hard_failures for severe issues like hidden contradictions, "
-                "uncited major claims, or recommendation strength that overstates the evidence."
+                "uncited major claims, or recommendation strength that overstates the evidence.\n\n"
+                "Check for these specific issues:\n"
+                "- Unsupported quantitative claims: any percentages, thresholds, or "
+                "specific numbers (e.g., '20%', '90%', '3 months') that lack a cited "
+                "source directly supporting that exact number.\n"
+                "- Mechanism misattribution: claims that attribute an effect to the "
+                "wrong mechanism (e.g., claiming 'mocking reduces hallucination by 90%' "
+                "when the source says 'output validation' does).\n"
+                "- Unsourced production readiness notes: directives like 'keep at least "
+                "X% optional' or 'run tests every N minutes' that lack citations.\n"
+                "- Empty or placeholder sections: tables with headers but no data rows."
             )),
             HumanMessage(content=(
                 f"REPORT BLUEPRINT:\n{json.dumps(report_blueprint or {}, indent=2)}\n\n"

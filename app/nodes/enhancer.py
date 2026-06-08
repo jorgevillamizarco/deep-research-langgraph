@@ -49,6 +49,16 @@ def _has_positive_evidence(text: str) -> bool:
     return bool(re.search(r"\[[^\]]+\]\(https?://[^\)]+\)", text) or re.search(r"https?://\S+", text))
 
 
+_GAP_REGEX = re.compile(
+    r"(?im)^(?!#)(?:(?!search results|original evaluation|previously missing|filling missing))"
+    r".*(not found|missing|could not retrieve|unconfirmed).*$"
+)
+
+
+def _is_meta_commentary(text: str) -> bool:
+    return bool(re.search(r"(search results|original evaluation|previously missing|filling missing)", text, re.IGNORECASE))
+
+
 def _refresh_evidence_gaps(existing_gaps: list[dict], follow_ups: list, supplement: str) -> list[dict]:
     targeted_queries = []
     for query in follow_ups:
@@ -67,8 +77,10 @@ def _refresh_evidence_gaps(existing_gaps: list[dict], follow_ups: list, suppleme
             continue
         refreshed_gaps.append(gap)
 
-    for match in re.finditer(r"(?im)^.*(not found|missing|could not retrieve|unconfirmed).*$", supplement):
+    for match in _GAP_REGEX.finditer(supplement):
         description = match.group(0).strip()
+        if _is_meta_commentary(description):
+            continue
         if any(str((gap or {}).get("description", "")).strip() == description for gap in refreshed_gaps):
             continue
         refreshed_gaps.append({

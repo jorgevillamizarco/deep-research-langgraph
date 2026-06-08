@@ -226,10 +226,17 @@ def merge_findings_node(state: ResearchState) -> dict:
             for sid in support_source_ids:
                 all_sources[sid].setdefault("used_for_claims", []).append(claim_id)
 
-        for match in re.finditer(r"(?im)^.*(not found|missing|could not retrieve|unconfirmed).*$", finding.summary):
+        for match in re.finditer(
+            r"(?im)^(?!#)(?:(?!search results|original evaluation|previously missing|filling missing))"
+            r".*(not found|missing|could not retrieve|unconfirmed).*$",
+            finding.summary,
+        ):
+            description = match.group(0).strip()
+            if re.search(r"(search results|original evaluation|previously missing|filling missing)", description, re.IGNORECASE):
+                continue
             evidence_gaps.append({
                 "gap_id": f"gap-{len(evidence_gaps) + 1}",
-                "description": match.group(0).strip(),
+                "description": description,
                 "why_it_matters": "This missing evidence weakens confidence in the conclusion.",
                 "impact_on_conclusion": "unknown",
             })

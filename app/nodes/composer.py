@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -100,8 +101,56 @@ def get_template_block_config(report_blueprint: dict | None) -> list[str]:
     return blocks_by_template.get(template, blocks_by_template["generic_research_report"])
 
 
+def _extract_claims_from_report(report: str, sources: dict) -> list[dict]:
+    """Extract structured claims from the report body for the Major Claims table.
+
+    Scans for sentences containing [src-N] citations and creates claim objects
+    with confidence derived from source tier.
+    """
+    claims: list[dict] = []
+    seen_texts: set[str] = set()
+
+    for match in re.finditer(r"\[src-(\d+)\]", report):
+        src_id = f"src-{match.group(1)}"
+        src = sources.get(src_id, {})
+        tier = src.get("tier", 3)
+        if isinstance(tier, str):
+            try:
+                tier = int(tier)
+            except (ValueError, TypeError):
+                tier = 3
+        confidence = 5 if tier == 1 else 4 if tier == 2 else 3
+
+        pos = match.start()
+        before = report.rfind(". ", 0, pos)
+        before = report.rfind("! ", 0, pos) if report.rfind("! ", 0, pos) > before else before
+        before = report.rfind("? ", 0, pos) if report.rfind("? ", 0, pos) > before else before
+        before = report.rfind(".\n", 0, pos) if report.rfind(".\n", 0, pos) > before else before
+        start = before + 2 if before >= 0 else max(0, pos - 200)
+
+        after = report.find(". ", pos)
+        after_alt = report.find(".\n", pos)
+        if after_alt >= 0 and (after < 0 or after_alt < after):
+            after = after_alt
+        end = after + 1 if after >= 0 else min(len(report), pos + 200)
+
+        claim_text = report[start:end].strip()
+        claim_text = re.sub(r"\s+", " ", claim_text)[:200]
+
+        if claim_text not in seen_texts:
+            seen_texts.add(claim_text)
+            claims.append({
+                "claim_id": f"claim-{len(claims) + 1}",
+                "text": claim_text,
+                "confidence": confidence,
+                "support_source_ids": [src_id],
+                "evidence_strength": "high" if confidence >= 4 else "medium" if confidence == 3 else "low",
+            })
+
+    return claims
+
+
 def build_evidence_appendix(sources: dict, evidence_claims: list[dict] | None, evidence_gaps: list[dict] | None) -> str:
-    """Render a deterministic evidence appendix from state data."""
     evidence_claims = evidence_claims or []
     evidence_gaps = evidence_gaps or []
     if not sources and not evidence_claims and not evidence_gaps:
@@ -333,6 +382,11 @@ Just the summary."""
 
     # Pass 2: Replace citation tags with markdown links
     report_with_markdown = replace_citation_tags(report_with_tags, sources)
+
+    # Pass 2b: Extract claims from report body for the evidence appendix
+    if not evidence_claims:
+        evidence_claims = _extract_claims_from_report(report_with_markdown, sources)
+
     appendix = build_evidence_appendix(sources, evidence_claims, evidence_gaps)
     if appendix.strip():
         report_with_markdown = f"{report_with_markdown.rstrip()}\n\n{appendix}\n"

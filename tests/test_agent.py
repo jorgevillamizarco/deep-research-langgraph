@@ -1688,6 +1688,27 @@ def test_report_critic_no_duplicate_sources_clean_register():
     assert warnings == []
 
 
+def test_composer_extracts_claims_from_report():
+    """Composer should extract structured claims from [src-N] citations in report body."""
+    from app.nodes.composer import _extract_claims_from_report
+
+    report = """## Section One
+This is a key finding about agent performance [src-1] that should be extracted.
+Another point about testing strategy [src-2] is also important.
+This sentence has no citation and should be skipped.
+"""
+
+    sources = {
+        "src-1": {"tier": 1, "url": "https://arxiv.org/1"},
+        "src-2": {"tier": 3, "url": "https://blog.com/2"},
+    }
+
+    claims = _extract_claims_from_report(report, sources)
+    assert len(claims) >= 1
+    assert any("src-1" in str(c.get("support_source_ids", [])) for c in claims)
+    assert any("src-2" in str(c.get("support_source_ids", [])) for c in claims)
+
+
 def test_cli_help_does_not_require_config(monkeypatch, capsys):
 
     """CLI --help should print usage without requiring API env vars."""
