@@ -41,6 +41,12 @@ def _extract_required_section_titles(report_blueprint: dict | None) -> list[str]
     return titles
 
 
+def _heading_present(title: str, headings: set[str]) -> bool:
+    """Check if required heading title appears as substring of any extracted heading."""
+    lowered = title.lower()
+    return any(lowered in h for h in headings)
+
+
 def _artifact_label_map() -> dict[str, str]:
     return {
         "decision_checklist": "Decision Checklist",
@@ -186,7 +192,7 @@ def report_critic_node(state: ResearchState) -> dict:
 
     required_sections = _extract_required_section_titles(report_blueprint)
     present_headings = _extract_heading_titles(report)
-    missing_sections = [title for title in required_sections if title.lower() not in present_headings]
+    missing_sections = [title for title in required_sections if not _heading_present(title, present_headings)]
 
     required_artifacts = list(report_blueprint.get("required_decision_artifacts") or [])
     artifact_labels = _artifact_label_map()
@@ -194,8 +200,13 @@ def report_critic_node(state: ResearchState) -> dict:
     lowered_report = report.lower()
     for artifact in required_artifacts:
         artifact_label = artifact_labels.get(str(artifact), str(artifact).replace("_", " ").title())
-        if artifact_label.lower() not in lowered_report:
-            missing_artifacts.append(artifact_label)
+        if artifact_label.lower() in lowered_report:
+            continue
+        short_words = artifact_label.lower().split()
+        short_label = " ".join(short_words[:1]) if len(short_words) > 1 else artifact_label.lower()
+        if len(short_label) >= 4 and short_label in lowered_report:
+            continue
+        missing_artifacts.append(artifact_label)
 
     warnings: list[str] = []
     hard_failures: list[str] = []

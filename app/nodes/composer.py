@@ -110,8 +110,9 @@ def _extract_claims_from_report(report: str, sources: dict) -> list[dict]:
     claims: list[dict] = []
     seen_texts: set[str] = set()
 
-    for match in re.finditer(r"\[src-(\d+)\]", report):
-        src_id = f"src-{match.group(1)}"
+    for match in re.finditer(r"(?:\[src-(\d+)\]|<cite\s+source=\"src-(\d+)\")", report):
+        src_num = match.group(1) or match.group(2)
+        src_id = f"src-{src_num}"
         src = sources.get(src_id, {})
         tier = src.get("tier", 3)
         if isinstance(tier, str):
@@ -380,12 +381,13 @@ Just the summary."""
             "errors": state.get("errors", []) + [f"Composer error: {e}"],
         }
 
-    # Pass 2: Replace citation tags with markdown links
-    report_with_markdown = replace_citation_tags(report_with_tags, sources)
-
-    # Pass 2b: Extract claims from report body for the evidence appendix
+    # Pass 2a: Extract claims from report body BEFORE citation replacement
+    # (claims need [src-N] / <cite> tags which are still present at this stage)
     if not evidence_claims:
-        evidence_claims = _extract_claims_from_report(report_with_markdown, sources)
+        evidence_claims = _extract_claims_from_report(report_with_tags, sources)
+
+    # Pass 2b: Replace citation tags with markdown links
+    report_with_markdown = replace_citation_tags(report_with_tags, sources)
 
     appendix = build_evidence_appendix(sources, evidence_claims, evidence_gaps)
     if appendix.strip():
