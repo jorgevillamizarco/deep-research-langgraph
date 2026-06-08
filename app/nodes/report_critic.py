@@ -52,6 +52,24 @@ def _artifact_label_map() -> dict[str, str]:
     }
 
 
+def _detect_duplicate_sources(report: str) -> list[str]:
+    """Scan Source Register for URLs appearing under multiple src-IDs."""
+    url_to_ids: dict[str, list[str]] = {}
+    for line in report.splitlines():
+        match = re.search(r"src-(\d+):\s*\[.*?\]\((https?://[^\)]+)\)", line)
+        if match:
+            src_id = match.group(1)
+            url = match.group(2).strip().rstrip("/")
+            url_to_ids.setdefault(url, []).append(src_id)
+    warnings = []
+    for url, ids in url_to_ids.items():
+        if len(ids) > 1:
+            warnings.append(f"Duplicate source: URL appears as src-{ids[0]} and src-{', '.join(ids[1:])} ({url})")
+    if len(warnings) <= 3:
+        return warnings
+    return [f"{len(warnings)} duplicate source entries found in Source Register (same URL under different src-IDs)"]
+
+
 def _parse_semantic_qa(text: str) -> dict | None:
     raw = text.strip()
     json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw, re.DOTALL)
@@ -186,6 +204,9 @@ def report_critic_node(state: ResearchState) -> dict:
         hard_failures.append("Report is missing inline citations")
     if sources and "## Evidence Appendix" not in report and depth != "brief":
         warnings.append("report is missing Evidence Appendix")
+    if sources:
+        dup_warnings = _detect_duplicate_sources(report)
+        warnings.extend(dup_warnings)
 
     semantic_warnings, semantic_failures, token_delta = _run_semantic_qa(report, report_blueprint, sufficiency)
     warnings.extend(semantic_warnings)

@@ -1643,6 +1643,51 @@ def test_evaluator_source_diversity_in_sufficiency():
     assert assessment["source_diversity"] == "medium"
 
 
+def test_report_critic_detects_duplicate_sources_in_register():
+    """Duplicate URLs under different src-IDs should be flagged."""
+    from app.nodes.report_critic import _detect_duplicate_sources
+
+    report = """## Source Register
+| src-1: [Article A](https://example.com/a) | 3 | unknown | — |
+| src-2: [Article B](https://example.com/b) | 3 | unknown | — |
+| src-3: [Article A again](https://example.com/a) | 3 | unknown | — |
+"""
+    warnings = _detect_duplicate_sources(report)
+    assert len(warnings) == 1
+    assert "duplicate source" in warnings[0].lower()
+
+
+def test_report_critic_duplicate_sources_consolidates_when_many():
+    """When more than 3 duplicate pairs exist, consolidate into a count."""
+    from app.nodes.report_critic import _detect_duplicate_sources
+
+    report = """## Source Register
+| src-1: [A](https://x.com/1) | 3 | unknown | — |
+| src-2: [A dup](https://x.com/1) | 3 | unknown | — |
+| src-3: [B](https://x.com/2) | 3 | unknown | — |
+| src-4: [B dup](https://x.com/2) | 3 | unknown | — |
+| src-5: [C](https://x.com/3) | 3 | unknown | — |
+| src-6: [C dup](https://x.com/3) | 3 | unknown | — |
+| src-7: [D](https://x.com/4) | 3 | unknown | — |
+| src-8: [D dup](https://x.com/4) | 3 | unknown | — |
+"""
+    warnings = _detect_duplicate_sources(report)
+    assert len(warnings) == 1
+    assert "4 duplicate source" in warnings[0].lower()
+
+
+def test_report_critic_no_duplicate_sources_clean_register():
+    """Clean register with unique URLs produces no warnings."""
+    from app.nodes.report_critic import _detect_duplicate_sources
+
+    report = """## Source Register
+| src-1: [Article A](https://example.com/a) | 3 | unknown | — |
+| src-2: [Article B](https://example.com/b) | 3 | unknown | — |
+"""
+    warnings = _detect_duplicate_sources(report)
+    assert warnings == []
+
+
 def test_cli_help_does_not_require_config(monkeypatch, capsys):
 
     """CLI --help should print usage without requiring API env vars."""
