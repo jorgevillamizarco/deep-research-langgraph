@@ -1452,8 +1452,199 @@ def test_report_critic_uses_critic_model_not_worker_model(monkeypatch):
     assert calls == {"model": "critic-model-x", "node_name": "report_critic"}
 
 
+def test_evaluator_detects_contradictions_when_high_confidence_claims_oppose():
+    """Two high-confidence claims from different sources making opposing statements should create a contradiction blocking gap."""
+    from app.nodes.evaluator import research_evaluator_node
+    from app.state import Feedback
+    import unittest.mock
+
+    state: ResearchState = {
+        "topic": "Is vitamin D effective for COVID-19 prevention?",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": "## Recommendation",
+        "report_blueprint": {
+            "template": "decision_memo",
+            "sections": [{"title": "Recommendation", "purpose": "decision"}],
+        },
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "Some findings about vitamin D and COVID.",
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "url_to_short_id": {"https://example.com/rct": "src-1", "https://other.org/meta": "src-2"},
+        "sources": {
+            "src-1": {"short_id": "src-1", "url": "https://example.com/rct", "title": "RCT study", "tier": 1},
+            "src-2": {"short_id": "src-2", "url": "https://other.org/meta", "title": "Meta-analysis", "tier": 1},
+        },
+        "evidence_claims": [
+            {
+                "claim_id": "claim-1",
+                "text": "Vitamin D supplementation significantly reduces COVID-19 infection risk in elderly populations.",
+                "section": "Research goal",
+                "confidence": 5,
+                "support_source_ids": ["src-1"],
+                "evidence_strength": "high",
+            },
+            {
+                "claim_id": "claim-2",
+                "text": "Vitamin D supplementation does not reduce COVID-19 infection risk.",
+                "section": "Research goal",
+                "confidence": 4,
+                "support_source_ids": ["src-2"],
+                "evidence_strength": "high",
+            },
+        ],
+        "evidence_gaps": [],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    with unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=Feedback(grade="pass", comment="Looks fine.", follow_up_queries=[])):
+        result = research_evaluator_node(state)
+
+    assessment = result["sufficiency_assessment"]
+    assert assessment["information_sufficient"] is False
+    assert len(assessment["contradictions"]) >= 1
+    assert any("vitamin" in c.lower() for c in assessment["contradictions"])
+    assert any("contradiction" in q.lower() for q in assessment["follow_up_queries"])
+
+
+def test_evaluator_no_contradiction_when_claims_agree():
+    """Claims that agree should not produce contradictions."""
+    from app.nodes.evaluator import _detect_contradictions
+
+    claims = [
+        {"claim_id": "c1", "text": "Vitamin D reduces risk.", "confidence": 5, "support_source_ids": ["src-1"], "evidence_strength": "high"},
+        {"claim_id": "c2", "text": "Vitamin D supplementation is effective.", "confidence": 4, "support_source_ids": ["src-2"], "evidence_strength": "high"},
+    ]
+    sources = {
+        "src-1": {"url": "https://a.com"},
+        "src-2": {"url": "https://b.com"},
+    }
+
+    contradictions = _detect_contradictions(claims)
+    assert contradictions == []
+
+
+def test_evaluator_no_contradiction_when_same_source():
+    """Claims from the same source should not be flagged as contradictions."""
+    from app.nodes.evaluator import _detect_contradictions
+
+    claims = [
+        {"claim_id": "c1", "text": "Drug X reduces mortality.", "confidence": 5, "support_source_ids": ["src-1"], "evidence_strength": "high"},
+        {"claim_id": "c2", "text": "Drug X does not reduce mortality.", "confidence": 5, "support_source_ids": ["src-1"], "evidence_strength": "high"},
+    ]
+    sources = {"src-1": {"url": "https://a.com"}}
+    contradictions = _detect_contradictions(claims)
+    assert contradictions == []
+
+
+def test_evaluator_no_contradiction_when_low_confidence():
+    """Low-confidence claims should not trigger contradiction detection."""
+    from app.nodes.evaluator import _detect_contradictions
+
+    claims = [
+        {"claim_id": "c1", "text": "Drug X reduces mortality.", "confidence": 2, "support_source_ids": ["src-1"], "evidence_strength": "low"},
+        {"claim_id": "c2", "text": "Drug X does not reduce mortality.", "confidence": 3, "support_source_ids": ["src-2"], "evidence_strength": "low"},
+    ]
+    sources = {"src-1": {"url": "https://a.com"}, "src-2": {"url": "https://b.com"}}
+    contradictions = _detect_contradictions(claims)
+    assert contradictions == []
+
+
+def test_evaluator_computes_source_diversity():
+    from app.nodes.evaluator import _compute_source_diversity
+
+    sources = {
+        "src-1": {"url": "https://example.com/a", "domain": "example.com"},
+        "src-2": {"url": "https://example.com/b", "domain": "example.com"},
+        "src-3": {"url": "https://other.org/x", "domain": "other.org"},
+        "src-4": {"url": "https://third.net/y", "domain": "third.net"},
+    }
+    diversity = _compute_source_diversity(sources)
+    assert diversity == "high"
+
+
+def test_evaluator_reports_low_source_diversity():
+    from app.nodes.evaluator import _compute_source_diversity
+
+    sources = {
+        "src-1": {"url": "https://example.com/a", "domain": "example.com"},
+        "src-2": {"url": "https://example.com/b", "domain": "example.com"},
+    }
+    diversity = _compute_source_diversity(sources)
+    assert diversity == "low"
+
+
+def test_evaluator_source_diversity_in_sufficiency():
+    """Source diversity should appear in the sufficiency assessment output."""
+    from app.nodes.evaluator import research_evaluator_node
+    from app.state import Feedback
+    import unittest.mock
+
+    state: ResearchState = {
+        "topic": "test",
+        "plan_approved": True,
+        "user_feedback": None,
+        "research_plan": "plan",
+        "report_sections": None,
+        "report_blueprint": None,
+        "current_goal": "",
+        "parallel_goals": [],
+        "parallel_findings": [],
+        "section_research_findings": "Well cited findings with https://example.com/a and https://example.com/b and https://other.org/data and benchmark numbers for 2024.",
+        "research_iteration": 0,
+        "research_evaluation": None,
+        "url_to_short_id": {
+            "https://example.com/a": "src-1",
+            "https://example.com/b": "src-2",
+            "https://other.org/data": "src-3",
+        },
+        "sources": {
+            "src-1": {"short_id": "src-1", "url": "https://example.com/a", "domain": "example.com", "tier": 2},
+            "src-2": {"short_id": "src-2", "url": "https://example.com/b", "domain": "example.com", "tier": 2},
+            "src-3": {"short_id": "src-3", "url": "https://other.org/data", "domain": "other.org", "tier": 2},
+        },
+        "evidence_claims": [],
+        "evidence_gaps": [],
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "report_critic_result": None,
+        "report_critic_passed": False,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 3,
+        "errors": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "token_breakdown": {},
+        "cached_goal_count": 0,
+        "depth": "standard",
+    }
+
+    with unittest.mock.patch("app.nodes.evaluator._rule_based_evaluation", return_value=Feedback(grade="pass", comment="Looks fine.", follow_up_queries=[])):
+        result = research_evaluator_node(state)
+
+    assessment = result["sufficiency_assessment"]
+    assert assessment["source_diversity"] == "medium"
+
 
 def test_cli_help_does_not_require_config(monkeypatch, capsys):
+
     """CLI --help should print usage without requiring API env vars."""
     import app.cli as cli
 

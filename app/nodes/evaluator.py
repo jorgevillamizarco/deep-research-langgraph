@@ -192,6 +192,93 @@ def _build_follow_up_query(topic: str, gap_description: str) -> str:
     return f"{topic} {cleaned_gap}".strip()
 
 
+_CONTRADICTION_POLARITY_PAIRS = [
+    (r"\bincreas(e|es|ing)\b", r"\bdecreas(e|es|ing)\b"),
+    (r"\breduc(e|es|ing)\b", r"\b(?:do|does)\s+not\s+reduc[ei]"),
+    (r"\beffective\b", r"\bineffective\b"),
+    (r"\bsignificant\b", r"\b(?:non.significant|no significant)\b"),
+    (r"\b(?:do|does)\s+not\b", r"\b(?<!do )(?<!does )\b(?:is|are|will|could|may)\b"),
+    (r"\bsupport\b", r"\b(?:does not support|no support|against)\b"),
+    (r"\bbenefit\b", r"\b(?:no benefit|harm|worsen)\b"),
+]
+
+
+def _words(text: str) -> set[str]:
+    return {word for word in re.findall(r"[a-z]{3,}", text.lower())}
+
+
+def _detect_contradictions(evidence_claims: list[dict]) -> list[str]:
+    high_claims = [
+        claim for claim in evidence_claims
+        if (claim.get("confidence") or 0) >= 4
+        and str(claim.get("evidence_strength", "")).lower() == "high"
+    ]
+    if len(high_claims) < 2:
+        return []
+
+    contradictions: list[str] = []
+    for i in range(len(high_claims)):
+        for j in range(i + 1, len(high_claims)):
+            claim_i = high_claims[i]
+            claim_j = high_claims[j]
+            ids_i = set(claim_i.get("support_source_ids", []))
+            ids_j = set(claim_j.get("support_source_ids", []))
+            if not ids_i or not ids_j:
+                continue
+            if ids_i == ids_j:
+                continue
+
+            text_i = str(claim_i.get("text", "")).lower()
+            text_j = str(claim_j.get("text", "")).lower()
+            for pos_pat, neg_pat in _CONTRADICTION_POLARITY_PAIRS:
+                if re.search(pos_pat, text_i) and re.search(neg_pat, text_j):
+                    words_i = _words(text_i)
+                    words_j = _words(text_j)
+                    overlap = words_i & words_j
+                    if len(overlap) >= 3:
+                        contradictions.append(
+                            f"High-confidence contradiction between {claim_i.get('claim_id', '?')} "
+                            f"({', '.join(sorted(ids_i))}) and {claim_j.get('claim_id', '?')} "
+                            f"({', '.join(sorted(ids_j))}): both discuss {', '.join(sorted(overlap)[:6])}"
+                        )
+                        break
+                if re.search(neg_pat, text_i) and re.search(pos_pat, text_j):
+                    words_i = _words(text_i)
+                    words_j = _words(text_j)
+                    overlap = words_i & words_j
+                    if len(overlap) >= 3:
+                        contradictions.append(
+                            f"High-confidence contradiction between {claim_i.get('claim_id', '?')} "
+                            f"({', '.join(sorted(ids_i))}) and {claim_j.get('claim_id', '?')} "
+                            f"({', '.join(sorted(ids_j))}): both discuss {', '.join(sorted(overlap)[:6])}"
+                        )
+                        break
+
+    return list(dict.fromkeys(contradictions))
+
+
+def _compute_source_diversity(sources: dict) -> str:
+    if not sources:
+        return "low"
+    domains: set[str] = set()
+    for source in sources.values():
+        domain = (source or {}).get("domain") or ""
+        if not domain and isinstance(source, dict):
+            url = source.get("url", "")
+            if "://" in url:
+                domain = url.split("://")[1].split("/")[0]
+        if domain:
+            domain = re.sub(r"^www\d*\.", "", domain)
+            domain = re.sub(r":\d+$", "", domain)
+            domains.add(domain)
+    domain_count = len(domains)
+    if domain_count >= 3:
+        return "high"
+    if domain_count >= 2:
+        return "medium"
+    return "low"
+
+
 def _assess_sufficiency(state: ResearchState) -> SufficiencyAssessment:
     evidence_gaps = state.get("evidence_gaps", []) or []
     required_evidence = _collect_required_evidence(state.get("report_blueprint"))
@@ -206,8 +293,17 @@ def _assess_sufficiency(state: ResearchState) -> SufficiencyAssessment:
             blocking_gaps.append(description)
 
     blocking_gaps = list(dict.fromkeys(blocking_gaps))
+
+    contradictions = _detect_contradictions(
+        state.get("evidence_claims", []) or [],
+    )
+    if contradictions:
+        blocking_gaps.extend(contradictions)
+
+    source_diversity = _compute_source_diversity(state.get("sources", {}) or {})
+
     if not blocking_gaps:
-        return SufficiencyAssessment(information_sufficient=True)
+        return SufficiencyAssessment(information_sufficient=True, source_diversity=source_diversity)
 
     recommendation_strength = "low"
     scores = state.get("evaluation_scores", []) or []
@@ -221,12 +317,17 @@ def _assess_sufficiency(state: ResearchState) -> SufficiencyAssessment:
         recommendation_strength = "no_recommendation"
 
     follow_up_queries = [_build_follow_up_query(state.get("topic", ""), gap) for gap in blocking_gaps]
+    if contradictions:
+        topic = state.get("topic", "")
+        follow_up_queries.append(f"{topic} resolving contradiction evidence comparison")
     follow_up_queries = [query for query in dict.fromkeys(follow_up_queries) if query]
     return SufficiencyAssessment(
         information_sufficient=False,
         blocking_gaps=blocking_gaps,
+        contradictions=contradictions,
         follow_up_queries=follow_up_queries,
         recommendation_strength=recommendation_strength,
+        source_diversity=source_diversity,
     )
 
 

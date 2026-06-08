@@ -106,28 +106,37 @@ def _append_final_qa(report: str, critic_result: dict, sufficiency: dict | None)
     missing_sections = critic_result.get("missing_sections") or []
     missing_artifacts = critic_result.get("missing_artifacts") or []
     blocking_gaps = sufficiency.get("blocking_gaps") or []
+    contradictions = sufficiency.get("contradictions") or []
     recommendation_strength = sufficiency.get("recommendation_strength")
+    source_diversity = sufficiency.get("source_diversity")
 
     report_body = report.rstrip()
-    if blocking_gaps and recommendation_strength:
+    if (blocking_gaps or contradictions) and recommendation_strength:
         lines = ["", "## Recommendation Constraints", ""]
         if recommendation_strength == "no_recommendation":
             lines.append("Do not make a decisive recommendation yet. Required evidence is still missing.")
         elif recommendation_strength == "low":
             lines.append("Any recommendation here should be treated as tentative because required evidence is still missing.")
         lines.append(f"Current recommendation strength: {recommendation_strength}")
-        lines.append(f"Open gaps: {'; '.join(blocking_gaps)}")
+        if blocking_gaps:
+            lines.append(f"Open gaps: {'; '.join(blocking_gaps)}")
+        if contradictions:
+            lines.append(f"Unresolved contradictions: {'; '.join(contradictions)}")
         report_body += "\n" + "\n".join(lines) + "\n"
 
     lines = ["", "## Final QA", "", f"- Status: {status}"]
     if recommendation_strength:
         lines.append(f"- Recommendation strength: {recommendation_strength}")
+    if source_diversity:
+        lines.append(f"- Source diversity: {source_diversity}")
     if missing_sections:
         lines.append(f"- Missing sections: {', '.join(missing_sections)}")
     if missing_artifacts:
         lines.append(f"- Missing artifacts: {', '.join(missing_artifacts)}")
     if blocking_gaps:
         lines.append(f"- Blocking gaps: {'; '.join(blocking_gaps)}")
+    if contradictions:
+        lines.append(f"- Contradictions: {'; '.join(contradictions)}")
     if warnings:
         lines.append(f"- Warnings: {'; '.join(warnings)}")
     return report_body + "\n" + "\n".join(lines) + "\n"

@@ -50,8 +50,10 @@ class SufficiencyAssessment(BaseModel):
 
     information_sufficient: bool
     blocking_gaps: list[str] = Field(default_factory=list)
+    contradictions: list[str] = Field(default_factory=list)
     follow_up_queries: list[str] = Field(default_factory=list)
     recommendation_strength: str = "medium"
+    source_diversity: str = "medium"
 
 
 class Citation(BaseModel):
