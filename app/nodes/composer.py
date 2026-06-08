@@ -110,8 +110,8 @@ def _extract_claims_from_report(report: str, sources: dict) -> list[dict]:
     claims: list[dict] = []
     seen_texts: set[str] = set()
 
-    for match in re.finditer(r"(?:\[src-(\d+)\]|<cite\s+source=\"src-(\d+)\")", report):
-        src_num = match.group(1) or match.group(2)
+    for match in re.finditer(r"(?:\[src-(\d+)\]|<cite\s+(?:source=\"src-(\d+)\"|src=\"(\d+)\"))", report):
+        src_num = match.group(1) or match.group(2) or match.group(3)
         src_id = f"src-{src_num}"
         src = sources.get(src_id, {})
         tier = src.get("tier", 3)
