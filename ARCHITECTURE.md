@@ -28,10 +28,12 @@ flowchart TB
             EN --> D
         end
         C["📄 Composer<br/>cited markdown report"]
+        RC["✅ Report Critic<br/>post-composer QA<br/>Final QA + constraints"]
         P --> PR
         PR --> M
         M --> Refine
         Refine -->|PASS| C
+        C --> RC
     end
 
     subgraph Search["Search Backend"]
@@ -67,6 +69,7 @@ sequenceDiagram
     participant Evaluator
     participant Enhancer
     participant Composer
+    participant ReportCritic
 
     User->>Planner: research topic
     Planner->>Planner: generate plan with [RESEARCH]/[DELIVERABLE] goals
@@ -91,7 +94,10 @@ sequenceDiagram
         end
     end
     Composer->>Composer: write report with <cite> tags → markdown links
-    Composer-->>User: final report
+    Composer->>ReportCritic: final report + sufficiency assessment
+    ReportCritic->>ReportCritic: structural checks, duplicate sources, semantic QA
+    ReportCritic->>ReportCritic: append ## Final QA + ## Recommendation Constraints
+    ReportCritic-->>User: QA'd final report
 ```
 
 ## State Design
@@ -260,10 +266,17 @@ flowchart TB
 | **Health check ≥30s** | Long research runs exceed default 5s Docker health check. Prevents flapping. |
 | **State pruning on report** | Composer caps accumulator lists (messages: 20, errors: 50, evaluation_scores: 5) to prevent O(N²) checkpoint bloat. Finding: 200-turn agent → 5.3 GB checkpoints without pruning. |
 | **DELIVERABLE failsafe** | Planner prompt mandates 1-2 DELIVERABLE goals. Post-processing appends default if none generated. Deliverable node has string-match failsafe when regex misses the tag. Phase 2 guaranteed to execute. |
-| **Circuit breaker** | Evaluator loop detects score stagnation across 2 iterations. If total score doesn't improve, forces pass to avoid wasted enhancer cycles. Scores parsed from evaluator comments for stagnation detection. |
+| **Circuit breaker** | Evaluator loop detects score stagnation across 2 iterations. If total score doesn't improve, forces pass with downgraded recommendation to avoid wasted enhancer cycles. |
 | **Async background execution** | `deep_research` returns task_id immediately (<1s). Pipeline runs in background thread (sync `graph.invoke()` blocks asyncio event loop). Client polls `research_status` every 10-15s. In-memory task cache prunes entries older than 24 hours, while persisted completed-task metadata is rehydrated on restart for dashboard history. |
 | **PRR assessment** | Production Readiness Review replaces letter grades. 5 dimensions (monitoring, incident response, security, scalability, operability) with concrete pass/fail items. See ROADMAP.md. |
 | **Topic enrichment** | Raw topic → structured research brief (domain, ambiguities, output format, key dimensions). One cheap LLM call before planning prevents entire research runs going in the wrong direction. Skips on feedback/refinement cycles. |
+| **Report blueprint** | Structured report template with required sections and decision artifacts propagated from planner through composer. Template-specific block configs (retail_investor_memo, decision_memo, architecture_review, etc.). |
+| **Sufficiency assessment** | Evaluator checks whether remaining evidence gaps block the final recommendation. Produces `information_sufficient`, `blocking_gaps`, `recommendation_strength`, and targeted `follow_up_queries`. Stagnation detection downgrades to `no_recommendation` when scores plateau. |
+| **Contradiction detection** | Compares high-confidence claims (confidence ≥ 4) from different sources using 7 polarity pairs. Requires ≥ 3 shared topic words. Blocking contradictions become gaps that trigger re-research. |
+| **Source diversity scoring** | Counts unique domains across sources. Normalizes www/ports. Returns low/medium/high. Non-blocking — informational in Final QA. |
+| **Report critic** | Post-composer QA gate: structural checks (sections, artifacts, inline citations), duplicate source detection (same URL under different src-IDs), semantic QA via dedicated LLM call (unsupported quantitative claims, mechanism misattributions, empty tables). Appends `## Final QA` and `## Recommendation Constraints`. |
+| **Claim extraction** | Composer scans report body for `[src-N]` citations and extracts enclosing sentences as structured claims for the evidence appendix Major Claims table. |
+| **Evidence gap filtering** | Regex-based gap extraction in enhancer and merge_findings excludes meta-commentary lines ("search results", "original evaluation", "previously missing") that leaked from refinement passes. |
 | **Verification pass** | After Phase 1 synthesis, detects domain-specific keywords (manufacturing, defense, etc.) and runs cross-check search with disambiguators (\"software engineering\"). Appends Verification Note if alternative context found. Only triggers when concerning terms detected — zero cost otherwise. |
 | **Writable directory fallback** | CLI and MCP server try RESEARCH_OUTPUT_DIR → ~/research → cwd with write-test probe. Prevents PermissionError when .docker.env (with /data) is sourced on host. |
 | **LLM timeout/retry** | `ChatOpenAI` configured with `timeout=60` and `max_retries=2` to handle transient API failures gracefully. |

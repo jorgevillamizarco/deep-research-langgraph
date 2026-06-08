@@ -795,24 +795,30 @@ Manual smoke tests before final commit:
 
 Treat this as a roadmap, not one giant implementation batch.
 
-| Milestone | Scope | Stop condition |
-|---|---|---|
-| A | Phases 1, 2, and minimal Phase 4 | Blueprint + deterministic evidence appendix + template headings work; no report critic failure behavior yet |
-| B | Phase 5 | Final critic records QA metadata and surfaces it through MCP/dashboard; hard failures narrowly defined |
-| C | Phases 3, 6, 7, 8 | Source scoring, sufficiency routing, budgets, and dashboard polish after evidence state is stable |
+| Milestone | Scope | Stop condition | Status |
+|---|---|---|---|---|
+| A | Phases 1, 2, and minimal Phase 4 | Blueprint + deterministic evidence appendix + template headings work; no report critic failure behavior yet | ✅ Complete (5017adb) |
+| B | Phase 5 | Final critic records QA metadata and surfaces it through MCP/dashboard; hard failures narrowly defined | ✅ Complete (acd79aa) |
+| C | Phases 3, 6, 7, 8 | Source scoring, sufficiency routing, budgets, and dashboard polish after evidence state is stable | ✅ Complete (f7c5219) |
+| — | Contradiction + source diversity | Contradiction detection across claims, source diversity scoring, Final QA integration | ✅ Complete (5d9f0cb) |
+| — | Duplicate source detection | Detect same URL under different src-IDs in source register | ✅ Complete (01512ae) |
+| — | Claim extraction + gap filtering + QA hardening | Populate Major Claims table, filter meta-commentary from evidence gaps, hardened semantic QA prompt | ✅ Complete (8c00eba) |
 
 Suggested commit boundaries inside those milestones:
 
-| Commit | Scope |
-|---|---|
-| 1 | Add blueprint models, state fields, planner fallback, tests |
-| 2 | Add evidence models/extraction/source appendix, tests |
-| 3 | Add source scoring, tests |
-| 4 | Add component-based composer templates, tests |
-| 5 | Add final report critic node, graph routing, tests |
-| 6 | Add sufficiency/gap-driven enhancer routing, tests |
-| 7 | Add simple budgets/model routing, tests |
-| 8 | Add MCP/dashboard/docs integration, deploy verification |
+| Commit | Scope | Status |
+|---|---|---|---|
+| 1 | Add blueprint models, state fields, planner fallback, tests | ✅ Done |
+| 2 | Add evidence models/extraction/source appendix, tests | ✅ Done |
+| 3 | Add source scoring, tests | ✅ Done |
+| 4 | Add component-based composer templates, tests | ✅ Done |
+| 5 | Add final report critic node, graph routing, tests | ✅ Done |
+| 6 | Add sufficiency/gap-driven enhancer routing, tests | ✅ Done |
+| 7 | Add simple budgets/model routing, tests | ✅ Done |
+| 8 | Add MCP/dashboard/docs integration, deploy verification | ✅ Done |
+| 9 | Add contradiction detection + source diversity scoring | ✅ Done (5d9f0cb) |
+| 10 | Add duplicate source detection in critic | ✅ Done (01512ae) |
+| 11 | Claim extraction, gap filtering, hardened semantic QA | ✅ Done (8c00eba) |
 
 ### Self-critique of this plan
 

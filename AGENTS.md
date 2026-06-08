@@ -14,14 +14,19 @@ Use **Production Readiness Review (PRR)** — not letter grades. Every item is a
 
 ## Architecture
 
-LangGraph StateGraph with 4 nodes + 1 subgraph (two-phase execution):
+LangGraph StateGraph with 5 nodes + report critic + subgraph (two-phase execution):
 
 ```
-planner → researcher → [refinement subgraph] → composer → report
+planner → researcher → [refinement subgraph] → composer → report_critic → report
                               │
                     deliverable ─► evaluator ─┤─ pass ──→ exit
                                 ▲              └─ fail ──→ enhancer ──┘
                                 └─────────────────────────── loop ────┘
+
+Report critic runs after composer and appends ## Final QA with:
+- Status (PASS/FAIL), recommendation strength, source diversity
+- Blocking gaps, contradictions, duplicate source entries
+- Semantic QA warnings (unsupported quantitative claims, mechanism misattributions, empty tables)
 ```
 
 Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_researcher nodes (Phase 1) → merge_findings → refinement_subgraph (Phase 2 + critique).
@@ -41,9 +46,10 @@ Parallel fan-out via Send API: planner extracts [RESEARCH] goals → N parallel_
 | `app/mcp_server.py` | MCP server exposing `deep_research` tool |
 | `app/nodes/planner.py` | Plan generation + interrupt + DELIVERABLE guarantee |
 | `app/nodes/researcher.py` | Phase 1 research + Phase 2 deliverable (with failsafe) |
-| `app/nodes/evaluator.py` | JSON-prompt quality evaluation + score extraction |
-| `app/nodes/enhancer.py` | Follow-up search + synthesis |
-| `app/nodes/composer.py` | Report synthesis with `<cite>`→ markdown + state pruning |
+| `app/nodes/evaluator.py` | Sufficiency assessment + evidence gap detection + contradiction detection + source diversity scoring |
+| `app/nodes/enhancer.py` | Follow-up search + synthesis + evidence gap refresh |
+| `app/nodes/composer.py` | Report synthesis with `<cite>`→ markdown + claim extraction + evidence appendix |
+| `app/nodes/report_critic.py` | Post-composer QA: structural checks, duplicate source detection, semantic QA, Final QA block |
 | `app/tools/search.py` | Tavily → SearXNG → DuckDuckGo fallback |
 | `app/tools/citations.py` | URL extraction, tier annotation, tag replacement |
 | `app/tokens.py` | Shared LLM factory + token tracking |
@@ -264,3 +270,34 @@ Lessons from building and iterating on this agent:
 **Stage labels turn blind polling into informed waiting.** `research_status` returning "Refining with deeper research (Phase 2) (65%)" tells the calling agent where it is in the pipeline. The stage data was already available internally from `graph.stream()` — it just wasn't surfaced to MCP clients. A 15-line change with zero performance impact.
 
 **Search language is not optional for jurisdiction-specific topics.** A research agent that searches in English for Spanish legal sources will hallucinate case numbers and claim information "cannot be found." The fix is three-layer: enrichment detects jurisdiction/language, planner annotates goals with `(search in LANGUAGE; sources: ...)`, and researcher extracts the annotation and forces queries in the target language. The regex must handle variations (`search in`, `buscar en`, `rechercher en`) and gracefully degrade for non-jurisdiction topics. This pattern generalizes to any region-specific research: German tax law, French labor code, Japanese patent law.
+
+## Sufficiency-Driven Quality Controls (v0.10+)
+
+Five quality-control features work together to produce grounded, self-critical reports:
+
+| Feature | Node | Mechanism |
+|---------|------|-----------|
+| **Report Blueprint** | planner → all | Structured report template with required sections, evidence requirements, and template-specific blocks. Propagated through state as `report_blueprint`. |
+| **Sufficiency Assessment** | evaluator | Checks if evidence gaps block the final recommendation. Produces `information_sufficient`, `blocking_gaps`, `recommendation_strength` (medium/low/no_recommendation), and targeted `follow_up_queries`. |
+| **Contradiction Detection** | evaluator | Compares high-confidence claims (>=4) from different sources. 7 polarity pairs. Blocking contradictions trigger re-research. |
+| **Source Diversity** | evaluator | Unique domain count with www/port normalization. Returns low/medium/high. Non-blocking. |
+| **Report Critic** | report_critic | Post-composer QA: structural checks, duplicate source detection, semantic QA via LLM. Appends *## Final QA* with status, strength, diversity, warnings. |
+| **Recommendation Constraints** | report_critic | When blocking gaps remain and strength is low/no_recommendation, appends *## Recommendation Constraints* with explicit missing-evidence disclosure. |
+| **Claim Extraction** | composer | Scans `[src-N]` citations in report body for evidence appendix Major Claims table. |
+| **Evidence Gap Filtering** | enhancer, merge_findings | Excludes meta-commentary ("search results", "original evaluation") from gap extraction. |
+| **Iterative Repair Routing** | agent | Blocking gaps → enhancer. Stagnation detection exits with downgraded recommendation. Max iterations as hard cap. |
+
+### State fields added
+
+`report_blueprint`, `evidence_claims`, `evidence_gaps`, `sufficiency_assessment`, `report_critic_result`, `report_critic_passed`, `final_report_with_citations`, `section_research_findings`
+
+### Latest commits (feature/milestone-a-evidence-structured-reports)
+
+- `5017adb` — Milestone A: ReportBlueprint foundation
+- `acd79aa` — Milestone B: Report critic node
+- `f7c5219` — Milestone C+D: Sufficiency-driven refinement controls
+- `5d9f0cb` — Contradiction detection + source diversity scoring
+- `01512ae` — Duplicate source detection in critic
+- `8c00eba` — Claim extraction, gap filter, hardened semantic QA prompt
+
+### Test baseline: 77/77 passing
