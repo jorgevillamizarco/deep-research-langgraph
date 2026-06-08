@@ -118,8 +118,17 @@ def _extract_claims_from_report(report: str, sources: dict) -> list[dict]:
         text = re.sub(r"^[-*]\s+", "", text)
         text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
         text = re.sub(r"\s+", " ", text).strip()
+        # Strip leading connector words / lowercase fragments
+        text = re.sub(r"^(and|but|or|however|additionally|furthermore|moreover|also|in addition|meanwhile)\s+", "", text, flags=re.IGNORECASE)
+        # Strip leading punctuation / stray characters
+        text = re.sub(r"^[;:,\s]+", "", text)
+        # Capitalize first letter
+        if text and text[0].islower():
+            text = text[0].upper() + text[1:]
+        # Truncate to nearest word boundary
         if len(text) > 200:
-            text = text[:197] + "..."
+            cut = text[:200].rfind(" ")
+            text = text[:cut] + "..." if cut > 140 else text[:197] + "..."
         return text
 
     def _extract_sentence_around(report: str, pos: int) -> str:

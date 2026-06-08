@@ -692,3 +692,37 @@ def test_enhancer_graceful_degradation():
     findings = result.get("section_research_findings", "")
     assert findings, "Should preserve Phase 1 findings on enhancer failure"
     assert "Phase 1 findings" in findings, "Phase 1 content should be preserved"
+
+
+def test_claim_text_is_polished():
+    """Claim text should not have connector words, stray punctuation, or mid-word truncation."""
+    from app.nodes.composer import _extract_claims_from_report
+
+    report = """## Results
+But the evidence suggests structured logging improves performance by 40% <cite src="1" />.
+Additionally, tracing patterns help debugging <cite src="2" />.
+;however, the baseline methodology varies across studies."""
+
+    sources = {
+        "src-1": {"tier": 2, "url": "https://x.com/1"},
+        "src-2": {"tier": 1, "url": "https://x.com/2"},
+    }
+
+    claims = _extract_claims_from_report(report, sources)
+    assert len(claims) >= 2
+
+    for claim in claims:
+        text = claim.get("text", "")
+        # Should not start with connector words or lowercase
+        assert not text.lower().startswith(("and ", "but ", "or ", "however ", "additionally ")), \
+            f"Claim starts with connector: {text[:60]}"
+        # Should not start with semicolon
+        assert not text.startswith(";"), f"Claim starts with semicolon: {text[:60]}"
+        # Should not have mid-word truncation (last 3 chars before ... should be a word)
+        if text.endswith("..."):
+            before_ellipsis = text[:-3].strip()
+            assert before_ellipsis[-1].isalpha() or before_ellipsis[-1] in ".)", \
+                f"Truncation mid-word: ends with '{before_ellipsis[-5:]}'"
+        # Should not contain raw cite tags
+        assert "<cite" not in text
+        assert "###" not in text
