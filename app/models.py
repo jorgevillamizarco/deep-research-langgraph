@@ -7,7 +7,42 @@ natively instead of relying on regex parsing.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+ReportTemplate = Literal[
+    "generic_research_report",
+    "decision_memo",
+    "retail_investor_memo",
+    "architecture_review",
+    "compare_and_recommend",
+    "legal_policy_brief",
+]
+
+
+class ReportSectionSpec(BaseModel):
+    """Structured description of a report section."""
+
+    title: str
+    purpose: str
+    required_evidence: list[str] = Field(default_factory=list)
+    required_components: list[str] = Field(default_factory=list)
+
+
+class ReportBlueprint(BaseModel):
+    """Audience-aware report blueprint produced by the planner."""
+
+    audience: str = "general"
+    decision_context: str = ""
+    template: ReportTemplate = "generic_research_report"
+    sections: list[ReportSectionSpec] = Field(default_factory=list)
+    required_tables: list[str] = Field(default_factory=list)
+    required_scenarios: list[str] = Field(default_factory=list)
+    required_decision_artifacts: list[str] = Field(default_factory=list)
+    source_requirements: list[str] = Field(default_factory=list)
+    confidence_policy: str = "State confidence for major claims and sections."
 
 
 class Citation(BaseModel):

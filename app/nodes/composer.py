@@ -48,6 +48,146 @@ def _serialize_sources(sources: dict) -> str:
     return json.dumps(compact, indent=2)
 
 
+def get_template_block_config(report_blueprint: dict | None) -> list[str]:
+    """Return deterministic block defaults for each report template."""
+    template = (report_blueprint or {}).get("template", "generic_research_report")
+    blocks_by_template = {
+        "generic_research_report": [
+            "answer_first_summary",
+            "open_questions",
+        ],
+        "decision_memo": [
+            "answer_first_summary",
+            "what_is_being_decided",
+            "key_facts_table",
+            "scenario_table",
+            "recommendation_block",
+            "open_questions",
+        ],
+        "retail_investor_memo": [
+            "answer_first_summary",
+            "what_is_being_decided",
+            "key_facts_table",
+            "economics_or_mechanics",
+            "scenario_table",
+            "risk_table",
+            "decision_checklist",
+            "recommendation_block",
+            "open_questions",
+        ],
+        "architecture_review": [
+            "answer_first_summary",
+            "what_is_being_decided",
+            "economics_or_mechanics",
+            "risk_table",
+            "recommendation_block",
+            "open_questions",
+        ],
+        "compare_and_recommend": [
+            "answer_first_summary",
+            "key_facts_table",
+            "scenario_table",
+            "recommendation_block",
+            "open_questions",
+        ],
+        "legal_policy_brief": [
+            "answer_first_summary",
+            "timeline",
+            "recommendation_block",
+            "open_questions",
+        ],
+    }
+    return blocks_by_template.get(template, blocks_by_template["generic_research_report"])
+
+
+def build_evidence_appendix(sources: dict, evidence_claims: list[dict] | None, evidence_gaps: list[dict] | None) -> str:
+    """Render a deterministic evidence appendix from state data."""
+    evidence_claims = evidence_claims or []
+    evidence_gaps = evidence_gaps or []
+    if not sources and not evidence_claims and not evidence_gaps:
+        return ""
+
+    lines = [
+        "## Evidence Appendix",
+        "",
+        "### Source Register",
+        "| Source | Tier | Type | Used for | Notes |",
+        "|---|---:|---|---|---|",
+    ]
+    for sid, src in sorted(sources.items()):
+        lines.append(
+            "| {source} | {tier} | {source_type} | {used_for} | {notes} |".format(
+                source=f"{sid}: [{src.get('title', sid)}]({src.get('url', '')})",
+                tier=src.get("tier", "?"),
+                source_type=src.get("source_type", "unknown"),
+                used_for=", ".join(src.get("used_for_claims", [])) or "—",
+                notes=src.get("authority_reason", "") or "—",
+            )
+        )
+
+    lines.extend([
+        "",
+        "### Major Claims",
+        "| Claim | Confidence | Evidence | Caveat |",
+        "|---|---:|---|---|",
+    ])
+    for claim in evidence_claims:
+        evidence_links = ", ".join(claim.get("support_source_ids", [])) or "—"
+        caveat = claim.get("evidence_strength", "")
+        lines.append(
+            f"| {claim.get('text', '')} | {claim.get('confidence', '?')} | {evidence_links} | {caveat or '—'} |"
+        )
+
+    lines.extend([
+        "",
+        "### Missing Evidence",
+        "| Gap | Why it matters | Impact |",
+        "|---|---|---|",
+    ])
+    for gap in evidence_gaps:
+        lines.append(
+            f"| {gap.get('description', '')} | {gap.get('why_it_matters', '') or '—'} | {gap.get('impact_on_conclusion', '') or '—'} |"
+        )
+
+    return "\n".join(lines)
+
+
+def _compose_section_outline(topic: str, report_blueprint: dict | None, sections: str) -> str:
+    """Build the section guidance passed into the composer prompt."""
+    blueprint = report_blueprint or {}
+    template = blueprint.get("template", "generic_research_report")
+    block_config = ", ".join(get_template_block_config(blueprint))
+    section_lines = [
+        f"# {topic}: Deep Research Report",
+        "## Executive Summary",
+        "[3-5 paragraphs. Standalone — readable without reading the full report.",
+        " Include overall confidence assessment: what's well-established vs speculative.]",
+        "",
+    ]
+    if sections.strip():
+        section_lines.append(sections.strip())
+    section_lines.extend([
+        "",
+        "## Cross-Cutting Themes",
+        "[Patterns across sections. Note any contradictions explicitly — flag them as",
+        ' "CONTRADICTION:" followed by the conflicting claims and their sources.]',
+        "",
+        "## Gaps & Uncertainties",
+        "[What's missing or unclear. List claims with confidence ≤2 as needing further investigation.]",
+        "",
+        "## Source Quality Assessment",
+        "[Brief assessment of evidence quality: how many Tier 1/2/3 sources, any reliance on",
+        " low-quality sources for key claims, overall strength of the evidence base.]",
+        "",
+        "## Methodology",
+        "[Brief note on how the research was conducted: web search, iterative refinement, etc.]",
+        "",
+        f"Template: {template}",
+        f"Preferred report blocks: {block_config}",
+    ])
+    return "\n".join(section_lines)
+
+
 def composer_node(state: ResearchState) -> dict:
     """Transform research findings and section outline into a final cited report.
 
@@ -56,8 +196,11 @@ def composer_node(state: ResearchState) -> dict:
     """
     findings = state.get("section_research_findings", "")
     plan = state.get("research_plan", "")
-    sections = state.get("report_sections", "")
+    sections = state.get("report_sections") or ""
+    report_blueprint = state.get("report_blueprint") or {}
     sources = state.get("sources", {})
+    evidence_claims = state.get("evidence_claims", [])
+    evidence_gaps = state.get("evidence_gaps", [])
     evaluations = state.get("research_evaluation")
     topic = state.get("topic", "")
     errors = state.get("errors", [])
@@ -124,6 +267,8 @@ Just the summary."""
             f"(after {len(scores)} iteration(s))\n"
         )
 
+    section_outline = _compose_section_outline(topic, report_blueprint, sections)
+
     system_prompt = f"""You are a professional research report composer. Transform the provided data into a polished, meticulously cited research report.
 
     CRITICAL CITATION SYSTEM:
@@ -134,7 +279,7 @@ Just the summary."""
     - Research Plan: {plan}
     - Research Findings: {findings}
     - Citation Sources (JSON): {sources_json}
-    - Report Structure: {sections}
+    - Report Structure: {section_outline}
     {eval_note}
     {scores_note}
     {errors_note}
@@ -142,8 +287,8 @@ Just the summary."""
 
     SOURCE QUALITY TIERS (for internal quality weighting — do NOT annotate citations with tiers):
       Tier 1 — academic papers, official docs, government (.gov, .edu, arxiv, IEEE)
-      Tier 2 — engineering blogs, industry publications, GitHub repos
-      Tier 3 — community forums, news, vendor content
+      Tier 2 — engineering blogs, industry publications
+      Tier 3 — community, news, vendor content
     Use the tier metadata to:
     - Prefer Tier 1/2 sources for key claims
     - Note when only Tier 3 sources support an important claim
@@ -154,30 +299,6 @@ Just the summary."""
     PRESERVE these confidence levels in your report. When a claim has borderline or low
     confidence (≤3), explicitly note the uncertainty: "Evidence suggests..." or
     "Preliminary data indicates..." rather than stating it as settled fact.
-
-    REPORT STRUCTURE (use the provided outline below as your primary section list):
-    # {topic}: Deep Research Report
-    ## Executive Summary
-    [3-5 paragraphs. Standalone — readable without reading the full report.
-     Include overall confidence assessment: what's well-established vs speculative.]
-
-    {sections}
-
-    ## Cross-Cutting Themes
-    [Patterns across sections. Note any contradictions explicitly — flag them as
-     "CONTRADICTION:" followed by the conflicting claims and their sources.]
-
-    ## Gaps & Uncertainties
-    [What's missing or unclear. List claims with confidence ≤2 as needing further investigation.]
-
-    ## Source Quality Assessment
-    [Brief assessment of evidence quality: how many Tier 1/2/3 sources, any reliance on
-     low-quality sources for key claims, overall strength of the evidence base.]
-
-    ## Methodology
-    [Brief note on how the research was conducted: web search, iterative refinement, etc.
-     If NON-FATAL ERRORS were reported, note them here. If scores improved across iterations,
-     mention the refinement process.]
 
     COMPOSITION RULES:
     1. Every factual claim must have an inline citation tag.
@@ -212,6 +333,9 @@ Just the summary."""
 
     # Pass 2: Replace citation tags with markdown links
     report_with_markdown = replace_citation_tags(report_with_tags, sources)
+    appendix = build_evidence_appendix(sources, evidence_claims, evidence_gaps)
+    if appendix.strip():
+        report_with_markdown = f"{report_with_markdown.rstrip()}\n\n{appendix}\n"
 
     print(f"  📄 Report generated — {len(report_with_markdown):,} chars", flush=True)
 

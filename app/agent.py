@@ -148,7 +148,10 @@ def merge_findings_node(state: ResearchState) -> dict:
     Uses typed accessors to avoid regex citation extraction — citations are
     carried in ResearchFinding models from _research_single_goal().
     """
+    import re
+
     from app.models import ResearchFinding
+    from app.tools.citations import annotate_source_tier
 
     raw_findings = state.get("parallel_findings", [])
     findings_text = "\n\n---\n\n".join(
@@ -159,29 +162,81 @@ def merge_findings_node(state: ResearchState) -> dict:
     logger.info("Merged %d parallel findings (%d chars)", len(raw_findings), len(findings_text))
     print(f"  📦 Phase 1 complete — {len(raw_findings)} goals, {len(findings_text):,} chars", flush=True)
 
-    # Extract citations from typed ResearchFinding objects (no regex)
-    all_sources: dict = {}
-    all_url_map: dict = {}
-    for i, finding in enumerate(raw_findings):
-        if isinstance(finding, ResearchFinding):
-            for j, c in enumerate(finding.citations):
-                sid = c.short_id or f"src-{len(all_sources) + 1}"
-                all_sources[sid] = {
-                    "short_id": sid, "url": c.url, "title": c.title or "",
-                    "tier": c.tier,
-                }
-                all_url_map[c.url] = sid
+    all_sources: dict = dict(state.get("sources", {}))
+    all_url_map: dict = dict(state.get("url_to_short_id", {}))
+    evidence_claims: list[dict] = []
+    evidence_gaps: list[dict] = []
+    existing_numeric_ids = [
+        int(sid.removeprefix("src-"))
+        for sid in all_sources
+        if isinstance(sid, str) and sid.startswith("src-") and sid.removeprefix("src-").isdigit()
+    ]
+    next_source_id = (max(existing_numeric_ids) + 1) if existing_numeric_ids else 1
+
+    def _canonical_source_id(url: str) -> str:
+        nonlocal next_source_id
+        existing = all_url_map.get(url)
+        if existing:
+            return existing
+        short_id = f"src-{next_source_id}"
+        next_source_id += 1
+        all_url_map[url] = short_id
+        return short_id
+
+    for finding in raw_findings:
+        if not isinstance(finding, ResearchFinding):
+            continue
+
+        for citation in finding.citations:
+            sid = _canonical_source_id(citation.url)
+            source = {
+                "short_id": sid,
+                "url": citation.url,
+                "title": citation.title or citation.url,
+                "domain": citation.url.split("/")[2] if "://" in citation.url else "",
+                "tier": citation.tier,
+                "authority_reason": citation.authority_reason,
+                "supported_claims": citation.supported_claims,
+                "used_for_claims": [],
+            }
+            if sid not in all_sources:
+                all_sources[sid] = annotate_source_tier(source)
+
+        for idx, tag in enumerate(finding.confidence_tags, start=1):
+            claim_id = f"claim-{len(evidence_claims) + 1}"
+            support_source_ids = [all_url_map[c.url] for c in finding.citations if c.url in all_url_map]
+            evidence_claims.append({
+                "claim_id": claim_id,
+                "text": tag.claim_text or f"Claim {idx} from {finding.goal_text}",
+                "section": finding.goal_text,
+                "confidence": tag.score,
+                "support_source_ids": support_source_ids,
+                "evidence_strength": "high" if tag.score >= 4 else "medium" if tag.score == 3 else "low",
+            })
+            for sid in support_source_ids:
+                all_sources[sid].setdefault("used_for_claims", []).append(claim_id)
+
+        for match in re.finditer(r"(?im)^.*(not found|missing|could not retrieve|unconfirmed).*$", finding.summary):
+            evidence_gaps.append({
+                "gap_id": f"gap-{len(evidence_gaps) + 1}",
+                "description": match.group(0).strip(),
+                "why_it_matters": "This missing evidence weakens confidence in the conclusion.",
+                "impact_on_conclusion": "unknown",
+            })
 
     # Fallback: regex extraction for string findings (backward compat)
     if not all_sources and findings_text:
         from app.tools.citations import extract_citations_from_content
-        existing_count = len(state.get("url_to_short_id", {}))
-        all_sources, all_url_map = extract_citations_from_content(findings_text, existing_count)
+        extracted_sources, extracted_url_map = extract_citations_from_content(findings_text)
+        all_sources = extracted_sources
+        all_url_map = extracted_url_map
 
     return {
         "section_research_findings": findings_text,
         "sources": all_sources,
         "url_to_short_id": all_url_map,
+        "evidence_claims": evidence_claims,
+        "evidence_gaps": evidence_gaps,
     }
 
 

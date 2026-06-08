@@ -94,6 +94,8 @@ class ResearchState(TypedDict):
     """Final approved research plan with [RESEARCH]/[DELIVERABLE] tags."""
     report_sections: Optional[str]
     """Markdown outline for the final report."""
+    report_blueprint: Optional[dict]
+    """Serialized ReportBlueprint produced by planner."""
     plan_approved: bool
     """Whether the human has approved the plan."""
 
@@ -118,6 +120,10 @@ class ResearchState(TypedDict):
     """URL → short_id (src-N) mapping. Merged across calls."""
     sources: Annotated[dict, operator.or_]
     """short_id → CitationSource dict. Merged across calls."""
+    evidence_claims: Annotated[list, operator.add]
+    """Structured evidence claims extracted from findings."""
+    evidence_gaps: Annotated[list, operator.add]
+    """Missing-evidence records extracted from findings."""
 
     # ── Phase 3: Report ──
     final_cited_report: Optional[str]

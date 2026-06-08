@@ -24,6 +24,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.config import config
+from app.models import ReportBlueprint, ReportSectionSpec, ReportTemplate
 from app.state import ResearchState
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,136 @@ def _extract_research_goals(plan: str) -> list[str]:
     return [g.strip() for g in goals if g.strip()]
 
 
+def select_report_template(topic: str) -> ReportTemplate:
+    """Choose a report template using simple topic heuristics."""
+    lowered = topic.lower()
+
+    if any(term in lowered for term in ("should i invest", "ipo", "stock", "retail investor")):
+        return "retail_investor_memo"
+    if any(term in lowered for term in ("should we choose", "should we build", "should we adopt")):
+        return "decision_memo"
+    if any(term in lowered for term in ("architecture", "system design", "agent architecture", "design improvement")):
+        return "architecture_review"
+    if any(term in lowered for term in ("compare", "best ", "rank", "versus", "vs ")):
+        return "compare_and_recommend"
+    if any(term in lowered for term in ("law", "legal", "regulatory", "jurisdiction", "visa", "immigration", "tax")):
+        return "legal_policy_brief"
+    return "generic_research_report"
+
+
+def _default_sections_for_template(template: ReportTemplate) -> list[ReportSectionSpec]:
+    """Deterministic starter sections for each report template."""
+    sections_by_template: dict[ReportTemplate, list[tuple[str, str]]] = {
+        "generic_research_report": [
+            ("Executive Summary", "Answer the question directly and summarize major findings."),
+            ("Key Findings", "Present the most important evidence and themes."),
+            ("Gaps & Uncertainties", "Disclose missing evidence and unresolved issues."),
+        ],
+        "decision_memo": [
+            ("Executive Summary", "State the decision and the recommendation."),
+            ("What Is Being Decided", "Clarify the actual choice and constraints."),
+            ("Options & Tradeoffs", "Compare realistic options and tradeoffs."),
+            ("Recommendation", "Give a direct recommendation with caveats."),
+        ],
+        "retail_investor_memo": [
+            ("Executive Summary", "State the invest / do-not-invest answer and why."),
+            ("What Is Being Decided", "Clarify the security, entry point, and investor exposure."),
+            ("Business & Economics", "Explain how the business works and key drivers."),
+            ("Valuation Scenarios", "Lay out bear/base/bull scenarios and assumptions."),
+            ("Retail Investor Checklist", "Give a go/no-go checklist for a retail investor."),
+            ("Recommendation", "State the recommendation and main caveats."),
+        ],
+        "architecture_review": [
+            ("Executive Summary", "Summarize the architecture recommendation."),
+            ("Current Architecture", "Describe the current system and constraints."),
+            ("Options & Tradeoffs", "Compare plausible improvements and tradeoffs."),
+            ("Implementation Roadmap", "Lay out the practical implementation sequence."),
+            ("Recommendation", "State the preferred path and why."),
+        ],
+        "compare_and_recommend": [
+            ("Executive Summary", "State the best option and why."),
+            ("Comparison Matrix", "Compare options against key criteria."),
+            ("Scoring Rationale", "Explain the weighting and judgment."),
+            ("Recommendation", "State the recommendation and caveats."),
+        ],
+        "legal_policy_brief": [
+            ("Question Presented", "State the legal or policy question precisely."),
+            ("Controlling Authorities", "Identify the highest-authority sources."),
+            ("Ambiguities", "Explain unresolved ambiguity and conflicting interpretations."),
+            ("Practical Answer", "Give the actionable answer with caveats."),
+        ],
+    }
+    return [ReportSectionSpec(title=title, purpose=purpose) for title, purpose in sections_by_template[template]]
+
+
+def _sections_to_markdown(sections: list[ReportSectionSpec]) -> str:
+    return "\n".join(f"## {section.title}" for section in sections)
+
+
+def build_report_blueprint(topic: str, plan: str, sections_markdown: str | None = None) -> ReportBlueprint:
+    """Create a deterministic report blueprint from topic and plan."""
+    template = select_report_template(topic)
+    audience = "general"
+    decision_context = topic.strip()
+    required_tables: list[str] = []
+    required_scenarios: list[str] = []
+    required_decision_artifacts: list[str] = []
+    source_requirements: list[str] = []
+
+    if template == "retail_investor_memo":
+        audience = "retail investor"
+        required_tables = ["key_facts_table", "risk_table"]
+        required_scenarios = ["bear", "base", "bull"]
+        required_decision_artifacts = ["decision_checklist", "recommendation_block"]
+        source_requirements = ["official filings", "reputable financial reporting"]
+    elif template == "architecture_review":
+        audience = "engineering leadership"
+        required_tables = ["options_tradeoff_table"]
+        required_decision_artifacts = ["implementation_roadmap", "recommendation_block"]
+        source_requirements = ["primary technical docs", "implementation examples"]
+    elif template == "decision_memo":
+        audience = "decision maker"
+        required_tables = ["options_table"]
+        required_decision_artifacts = ["scenario_table", "recommendation_block"]
+    elif template == "compare_and_recommend":
+        required_tables = ["comparison_matrix"]
+        required_decision_artifacts = ["recommendation_block"]
+    elif template == "legal_policy_brief":
+        audience = "policy or legal reader"
+        source_requirements = ["controlling authorities", "jurisdiction-specific sources"]
+
+    section_specs = _default_sections_for_template(template)
+    if template == "generic_research_report" and sections_markdown and sections_markdown.strip():
+        parsed_titles = [
+            line.strip().lstrip("#").strip()
+            for line in sections_markdown.splitlines()
+            if line.strip().startswith("##")
+        ]
+        if parsed_titles:
+            section_specs = [ReportSectionSpec(title=title, purpose="Planned report section.") for title in parsed_titles]
+
+    return ReportBlueprint(
+        audience=audience,
+        decision_context=decision_context,
+        template=template,
+        sections=section_specs,
+        required_tables=required_tables,
+        required_scenarios=required_scenarios,
+        required_decision_artifacts=required_decision_artifacts,
+        source_requirements=source_requirements,
+    )
+
+
+def generate_blueprint_and_sections(topic: str, plan: str, sections_markdown: str | None = None) -> tuple[ReportBlueprint, str]:
+    """Build a blueprint and ensure markdown report sections exist."""
+    blueprint = build_report_blueprint(topic, plan, sections_markdown)
+    if blueprint.template == "generic_research_report" and sections_markdown and sections_markdown.strip():
+        normalized_sections = sections_markdown.strip()
+    else:
+        normalized_sections = _sections_to_markdown(blueprint.sections)
+    return blueprint, normalized_sections
+
+
 def planner_node(state: ResearchState) -> dict:
     """Generate research plan, extract parallel goals.
 
@@ -112,6 +243,7 @@ def planner_node(state: ResearchState) -> dict:
     llm = _get_llm()
     plan = _generate_plan(topic, previous_plan, state.get("user_feedback"), llm=llm)
     sections = _generate_sections(plan, llm=llm)
+    blueprint, sections = generate_blueprint_and_sections(topic, plan, sections)
     goals = _extract_research_goals(plan)
 
     # Guarantee at least one DELIVERABLE goal
@@ -128,6 +260,7 @@ def planner_node(state: ResearchState) -> dict:
     return {
         "research_plan": plan,
         "report_sections": sections,
+        "report_blueprint": blueprint.model_dump(),
         "plan_approved": False,
         "parallel_goals": goals,
         **llm.token_delta(),
@@ -213,6 +346,7 @@ def generate_plan_only(topic: str, previous_plan: str | None = None,
 
     plan = _generate_plan(research_topic, previous_plan, user_feedback, llm=llm)
     sections = _generate_sections(plan, llm=llm)
+    blueprint, sections = generate_blueprint_and_sections(topic, plan, sections)
 
     # Guarantee at least one DELIVERABLE goal
     if "[DELIVERABLE]" not in plan:
@@ -228,6 +362,7 @@ def generate_plan_only(topic: str, previous_plan: str | None = None,
     return {
         "research_plan": plan,
         "report_sections": sections,
+        "report_blueprint": blueprint.model_dump(),
         "parallel_goals": goals,
         **llm.token_delta(),
     }

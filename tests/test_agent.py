@@ -303,13 +303,229 @@ def test_planner_generates_plan_when_not_approved():
         "parallel_findings": [],
     }
 
-    import os
-
     with unittest.mock.patch("app.nodes.planner._get_llm", return_value=mock_llm):
         result = planner_node(state)
     assert "research_plan" in result
     assert "parallel_goals" in result
     assert "[DELIVERABLE]" in result["research_plan"]
+
+
+def test_selects_retail_investor_template_for_ipo_question():
+    """Planner heuristics classify retail-investor topics correctly."""
+    from app.nodes.planner import select_report_template
+
+    template = select_report_template("Should I invest in the SpaceX IPO as a retail investor?")
+
+    assert template == "retail_investor_memo"
+
+
+def test_generate_plan_only_returns_report_blueprint():
+    """generate_plan_only returns a serialized report blueprint."""
+    from app.nodes.planner import generate_plan_only
+    import unittest.mock
+
+    mock_llm = unittest.mock.MagicMock()
+    mock_response = unittest.mock.MagicMock()
+    mock_response.content = (
+        "[RESEARCH] Analyze the company offering\n"
+        "[RESEARCH] Compare valuation scenarios\n"
+        "[DELIVERABLE] Produce investor recommendation\n"
+    )
+    mock_llm.invoke.return_value = mock_response
+    mock_llm.token_delta.return_value = {"total_tokens": 100}
+
+    with unittest.mock.patch("app.nodes.planner._get_llm", return_value=mock_llm):
+        result = generate_plan_only("Should I invest in the SpaceX IPO as a retail investor?", enriched=False)
+
+    blueprint = result.get("report_blueprint")
+    assert isinstance(blueprint, dict)
+    assert blueprint["template"] == "retail_investor_memo"
+    assert blueprint["audience"] == "retail investor"
+    assert blueprint["sections"]
+    assert "## What Is Being Decided" in result["report_sections"]
+
+
+def test_generate_blueprint_and_sections_prefers_template_structure_for_specialized_reports():
+    """Specialized templates should enforce deterministic section headings."""
+    from app.nodes.planner import generate_blueprint_and_sections
+
+    blueprint, sections = generate_blueprint_and_sections(
+        topic="Should I invest in the SpaceX IPO as a retail investor?",
+        plan="[RESEARCH] Analyze the company offering\n[DELIVERABLE] Produce investor recommendation",
+        sections_markdown="## Generic Intro\n## Generic Risks",
+    )
+
+    assert blueprint.template == "retail_investor_memo"
+    assert "## What Is Being Decided" in sections
+    assert "## Valuation Scenarios" in sections
+    assert "## Generic Intro" not in sections
+
+
+def test_planner_node_returns_report_blueprint():
+    """planner_node populates report_blueprint for graph execution too."""
+    from app.nodes.planner import planner_node
+    import unittest.mock
+
+    mock_llm = unittest.mock.MagicMock()
+    mock_response = unittest.mock.MagicMock()
+    mock_response.content = (
+        "[RESEARCH] Analyze the current agent architecture\n"
+        "[RESEARCH] Compare improvement options\n"
+        "[DELIVERABLE] Produce implementation roadmap\n"
+    )
+    mock_llm.invoke.return_value = mock_response
+    mock_llm.token_delta.return_value = {"total_tokens": 100}
+
+    state: ResearchState = {
+        "topic": "How should we improve our LangGraph agent architecture?",
+        "plan_approved": False,
+        "research_plan": None,
+        "report_sections": None,
+        "report_blueprint": None,
+        "section_research_findings": None,
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [],
+    }
+
+    with unittest.mock.patch("app.nodes.planner._get_llm", return_value=mock_llm):
+        result = planner_node(state)
+
+    blueprint = result.get("report_blueprint")
+    assert isinstance(blueprint, dict)
+    assert blueprint["template"] == "architecture_review"
+    assert blueprint["sections"]
+
+
+def test_merge_findings_reuses_existing_source_id_for_duplicate_url():
+    """Merge step normalizes duplicate URLs to one global source ID."""
+    from app.agent import merge_findings_node
+    from app.models import Citation, ResearchFinding
+
+    finding_one = ResearchFinding(
+        goal_text="Goal 1",
+        summary="Finding one",
+        citations=[Citation(short_id="src-1", title="Example", url="https://example.com", tier=2)],
+    )
+    finding_two = ResearchFinding(
+        goal_text="Goal 2",
+        summary="Finding two",
+        citations=[Citation(short_id="src-1", title="Example duplicate", url="https://example.com", tier=2)],
+    )
+
+    state: ResearchState = {
+        "topic": "test",
+        "plan_approved": True,
+        "research_plan": "plan",
+        "report_sections": None,
+        "report_blueprint": None,
+        "section_research_findings": None,
+        "research_evaluation": None,
+        "research_iteration": 0,
+        "url_to_short_id": {},
+        "sources": {},
+        "final_cited_report": None,
+        "final_report_with_citations": None,
+        "messages": [],
+        "iteration_count": 0,
+        "max_iterations": 5,
+        "user_feedback": None,
+        "errors": [],
+        "current_goal": "",
+        "parallel_goals": [],
+        "evaluation_scores": [],
+        "total_tokens": 0,
+        "cached_goal_count": 0,
+        "depth": "standard",
+        "parallel_findings": [finding_one, finding_two],
+    }
+
+    result = merge_findings_node(state)
+
+    assert result["url_to_short_id"] == {"https://example.com": "src-1"}
+    assert list(result["sources"]) == ["src-1"]
+
+
+def test_build_evidence_appendix_from_state():
+    """Composer builds a deterministic evidence appendix from state data."""
+    from app.nodes.composer import build_evidence_appendix
+
+    appendix = build_evidence_appendix(
+        sources={
+            "src-1": {
+                "short_id": "src-1",
+                "title": "SEC Filing",
+                "url": "https://sec.gov/example",
+                "domain": "sec.gov",
+                "tier": 1,
+                "source_type": "official",
+                "authority_reason": "Primary filing",
+                "used_for_claims": ["claim-1"],
+            }
+        },
+        evidence_claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "Revenue grew 20% year over year.",
+                "confidence": 4,
+                "support_source_ids": ["src-1"],
+                "evidence_strength": "high",
+            }
+        ],
+        evidence_gaps=[
+            {
+                "gap_id": "gap-1",
+                "description": "No audited quarterly cash flow statement found",
+                "why_it_matters": "Liquidity risk is unclear",
+                "impact_on_conclusion": "medium",
+            }
+        ],
+    )
+
+    assert "## Evidence Appendix" in appendix
+    assert "SEC Filing" in appendix
+    assert "Revenue grew 20% year over year." in appendix
+    assert "No audited quarterly cash flow statement found" in appendix
+
+
+def test_build_evidence_appendix_omits_empty_appendix():
+    """Composer should not append empty evidence tables."""
+    from app.nodes.composer import build_evidence_appendix
+
+    appendix = build_evidence_appendix(sources={}, evidence_claims=[], evidence_gaps=[])
+
+    assert appendix == ""
+
+
+def test_template_block_config_uses_retail_investor_sections():
+    """Composer exposes retail-investor report blocks deterministically."""
+    from app.nodes.composer import get_template_block_config
+
+    blocks = get_template_block_config(
+        {
+            "template": "retail_investor_memo",
+            "required_sections": [],
+        }
+    )
+
+    assert "what_is_being_decided" in blocks
+    assert "scenario_table" in blocks
+    assert "decision_checklist" in blocks
 
 
 def test_rule_based_evaluation_clear_pass():
