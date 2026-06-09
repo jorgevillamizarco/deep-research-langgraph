@@ -279,7 +279,9 @@ Five quality-control features work together to produce grounded, self-critical r
 |---------|------|-----------|
 | **Report Blueprint** | planner → all | Structured report template with required sections, evidence requirements, and template-specific blocks. Propagated through state as `report_blueprint`. |
 | **Sufficiency Assessment** | evaluator | Checks if evidence gaps block the final recommendation. Produces `information_sufficient`, `blocking_gaps`, `recommendation_strength` (medium/low/no_recommendation), and targeted `follow_up_queries`. |
-| **Contradiction Detection** | report_critic | Compares high-confidence claims from different sources after composition. 7 polarity pairs detect opposing claims (significant/not significant, effective/ineffective). Contradictions become hard_failures visible in Final QA. |
+| **Contradiction Detection** | report_critic | Compares high-confidence claims from different sources after composition. 7 polarity pairs. 60+ stop words across 4 categories (function words, LLM domain terms, URL fragments, research vocabulary). Contradictions become hard_failures visible in Final QA. |
+| **Blueprint Matching** | report_critic | Content-based keyword matching instead of heading string comparison. Section titles are decomposed into topic words (excluding boilerplate like "strategies", "approaches") and checked for presence in report body. Eliminates false missing-section flags from LLM heading variation. |
+| **Self-Disclosure Respect** | report_critic | Semantic QA prompt respects explicit caveats. If the report discloses a limitation ("scores derived from inference", "confidence is moderate"), it's flagged as a warning, not a hard failure. |
 | **Source Diversity** | evaluator | Unique domain count with www/port normalization. Returns low/medium/high. Non-blocking. |
 | **Report Critic** | report_critic | Post-composer QA: structural checks, duplicate source detection, semantic QA via LLM. Appends *## Final QA* with status, strength, diversity, warnings. |
 | **Recommendation Constraints** | report_critic | When blocking gaps remain and strength is low/no_recommendation, appends *## Recommendation Constraints* with explicit missing-evidence disclosure. |
@@ -311,8 +313,22 @@ Five quality-control features work together to produce grounded, self-critical r
 - `328bcef` — Feat: polish claim text (word-boundary truncation, strip connectors)
 - `0a9e34a` — Fix: deploy.sh to bypass Hermes API key redaction
 - `f9c08cf` — Fix: move contradiction detection to report critic (post-composition)
+- `d49c08f` — Docs: update all three md files with latest features
+- `2b23016` — Fix: stop-word filter v1 (function + LLM domain words) for contradiction detector
+- `477eaa7` — Fix: stop-word filter v2 (URL fragments) for contradiction detector
+- `c08e272` — Fix: blueprint section matching uses content keywords, not heading strings
+- `9dadc92` — Fix: stop-word filter v3 (generic research terms) for contradiction detector
+- `3788af1` — Fix: self-disclosed limitations downgraded from hard failures to warnings
 
-### Test baseline: 86/86 passing
+### Test baseline: 87/87 passing
+
+### Agent Health
+
+After 4 rounds of live testing on the same LangGraph research topic:
+- Missing-section false positives: 6 → 0 (heading strings → content keywords)
+- Contradiction false positives: 2 → 0 (URL/domain/research stop words, 60+ terms)
+- Self-disclosed limitations: hard failure → warning (respects report's own caveats)
+- Verdict: FAIL → **PASS** (from formatting penalties to substance-only judgment)
 
 ### Deploy
 
