@@ -75,6 +75,27 @@ def test_tasks_api_includes_persisted_tasks(tmp_path, monkeypatch):
     assert "pdf_path" not in persisted
 
 
+def test_tasks_api_freezes_elapsed_for_finished_tasks(tmp_path, monkeypatch):
+    """Completed tasks should stop incrementing elapsed time in the dashboard."""
+    import app.mcp_server as mcp_server
+
+    report_path = tmp_path / "report_test.md"
+    report_path.write_text("# Report")
+    for status in ("completed", "failed"):
+        task = {
+            "task_id": f"research-finished-{status}",
+            "topic": "Finished topic",
+            "status": status,
+            "progress": 1.0,
+            "created_at": 1000,
+            "completed_at": 1100,
+            "stage": "report_critic",
+            "report_path": str(report_path),
+        }
+
+        assert mcp_server._task_api_view(task, now=2000)["elapsed"] == 100
+
+
 def test_ready_endpoint_reports_dependency_status(monkeypatch, tmp_path):
     """Readiness endpoint reports ok only when runtime dependencies are reachable."""
     import app.mcp_server as mcp_server

@@ -649,6 +649,9 @@ def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
     """Project internal task state into the dashboard/API response shape."""
     stage_raw = task.get('stage', '')
     created_at = task.get('created_at', task.get('completed_at', now))
+    is_terminal = task.get('status') in {'completed', 'failed'}
+    completed_at = task.get('completed_at') if is_terminal else None
+    elapsed = int(max(((completed_at if completed_at is not None else now) - created_at) if is_terminal else (now - created_at), 0))
     report_path = task.get('report_path', '')
     pdf_path = task.get('pdf_path')
     return {
@@ -657,7 +660,7 @@ def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
         'status': task.get('status', 'unknown'),
         'progress': task.get('progress', 0),
         'stage': STAGE_LABELS.get(stage_raw, stage_raw),
-        'elapsed': int(max(now - created_at, 0)),
+        'elapsed': elapsed,
         'has_report': bool(report_path),
         'report_filename': Path(report_path).name if report_path else '',
         'has_pdf': bool(pdf_path),

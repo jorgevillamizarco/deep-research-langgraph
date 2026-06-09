@@ -93,6 +93,7 @@ Assessment framework: pass/fail per item with concrete evidence. No letter grade
 - [x] Self-documenting MCP tools (rich descriptions with HOW IT WORKS/OUTPUT FORMAT/TOPIC GUIDANCE; outputSchema removed — Hermes enforces it on results)
 - [x] Stage labels in research_status (human-readable pipeline stage alongside numeric progress)
 - [x] Web dashboard (`http://localhost:8100/`) — task list, progress bars, inline report viewer, launch form
+- [x] Dashboard elapsed timer freezes on task completion/failed states instead of continuing to count
 - [x] Concurrent execution (multiple research tasks run in parallel via asyncio.to_thread + isolated checkpoints)
 - [x] Concurrent bugs fixed (os.environ race, thread_id collision, report filename collision)
 - [x] PDF generation (opt-in via MCP `pdf: true` or dashboard checkbox, pandoc + weasyprint, `/download` route)

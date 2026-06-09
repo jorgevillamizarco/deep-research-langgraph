@@ -319,8 +319,9 @@ Five quality-control features work together to produce grounded, self-critical r
 - `c08e272` — Fix: blueprint section matching uses content keywords, not heading strings
 - `9dadc92` — Fix: stop-word filter v3 (generic research terms) for contradiction detector
 - `3788af1` — Fix: self-disclosed limitations downgraded from hard failures to warnings
+- `f12a7e4` — Fix: freeze dashboard elapsed timer when tasks finish
 
-### Test baseline: 87/87 passing
+### Test baseline: 88/88 passing
 
 ### Agent Health
 
@@ -328,6 +329,7 @@ After 4 rounds of live testing on the same LangGraph research topic:
 - Missing-section false positives: 6 → 0 (heading strings → content keywords)
 - Contradiction false positives: 2 → 0 (URL/domain/research stop words, 60+ terms)
 - Self-disclosed limitations: hard failure → warning (respects report's own caveats)
+- Dashboard elapsed timer: now freezes at completion instead of continuing to count
 - Verdict: FAIL → **PASS** (from formatting penalties to substance-only judgment)
 
 ### Deploy
