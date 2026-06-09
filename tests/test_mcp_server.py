@@ -79,9 +79,9 @@ def test_format_elapsed_minutes():
     """Elapsed UI labels should render in minutes, not seconds."""
     import app.mcp_server as mcp_server
 
-    assert mcp_server._format_elapsed_minutes(30) == "0.5m"
-    assert mcp_server._format_elapsed_minutes(90) == "1.5m"
-    assert mcp_server._format_elapsed_minutes(600) == "10m"
+    assert mcp_server._format_elapsed_duration(30) == "0m30s"
+    assert mcp_server._format_elapsed_duration(90) == "1m30s"
+    assert mcp_server._format_elapsed_duration(600) == "10m00s"
 
 
 def test_tasks_api_freezes_elapsed_for_finished_tasks(tmp_path, monkeypatch):

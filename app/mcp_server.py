@@ -547,7 +547,7 @@ async def _handle_research_status(
 **Topic:** {task.get("topic", "")}
 **Status:** {status}
 **Stage:** {stage_label} ({progress_pct:.0%})
-**Elapsed:** {_format_elapsed_minutes(elapsed)}
+**Elapsed:** {_format_elapsed_duration(elapsed)}
 
 Poll again in 10-15 seconds."""
         )]
@@ -645,10 +645,11 @@ def _hydrate_task_cache_from_disk(limit: int = 100) -> None:
 
 
 
-def _format_elapsed_minutes(seconds: float) -> str:
-    """Format elapsed time for user-facing UI labels in minutes."""
-    minutes = max(seconds, 0) / 60
-    return f"{minutes:.1f}m" if minutes < 10 else f"{minutes:.0f}m"
+def _format_elapsed_duration(seconds: float) -> str:
+    """Format elapsed time for user-facing UI labels as minutes and seconds."""
+    total = int(max(seconds, 0))
+    minutes, secs = divmod(total, 60)
+    return f"{minutes}m{secs:02d}s"
 
 
 def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
@@ -1145,8 +1146,10 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
 <script>
 let fetchErrorCount = 0;
 function formatElapsedMinutes(seconds) {
-  const mins = Math.max(seconds, 0) / 60;
-  return (mins < 10 ? mins.toFixed(1) : Math.round(mins).toString()) + 'm';
+  const total = Math.max(Math.floor(seconds), 0);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}m${String(secs).padStart(2, '0')}s`;
 }
 async function refresh() {
   try {
