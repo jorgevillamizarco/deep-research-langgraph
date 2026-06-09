@@ -319,7 +319,7 @@ Five quality-control features work together to produce grounded, self-critical r
 - `c08e272` — Fix: blueprint section matching uses content keywords, not heading strings
 - `9dadc92` — Fix: stop-word filter v3 (generic research terms) for contradiction detector
 - `3788af1` — Fix: self-disclosed limitations downgraded from hard failures to warnings
-- `f12a7e4` — Fix: freeze dashboard elapsed timer when tasks finish
+- `1a36854` — Fix: freeze dashboard elapsed timer when tasks finish
 
 ### Test baseline: 88/88 passing
 
