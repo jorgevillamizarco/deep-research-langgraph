@@ -75,6 +75,15 @@ def test_tasks_api_includes_persisted_tasks(tmp_path, monkeypatch):
     assert "pdf_path" not in persisted
 
 
+def test_format_elapsed_minutes():
+    """Elapsed UI labels should render in minutes, not seconds."""
+    import app.mcp_server as mcp_server
+
+    assert mcp_server._format_elapsed_minutes(30) == "0.5m"
+    assert mcp_server._format_elapsed_minutes(90) == "1.5m"
+    assert mcp_server._format_elapsed_minutes(600) == "10m"
+
+
 def test_tasks_api_freezes_elapsed_for_finished_tasks(tmp_path, monkeypatch):
     """Completed tasks should stop incrementing elapsed time in the dashboard."""
     import app.mcp_server as mcp_server

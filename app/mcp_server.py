@@ -547,7 +547,7 @@ async def _handle_research_status(
 **Topic:** {task.get("topic", "")}
 **Status:** {status}
 **Stage:** {stage_label} ({progress_pct:.0%})
-**Elapsed:** {elapsed:.0f}s
+**Elapsed:** {_format_elapsed_minutes(elapsed)}
 
 Poll again in 10-15 seconds."""
         )]
@@ -643,6 +643,12 @@ def _hydrate_task_cache_from_disk(limit: int = 100) -> None:
         if task_id and task_id not in _research_tasks:
             _research_tasks[task_id] = task
 
+
+
+def _format_elapsed_minutes(seconds: float) -> str:
+    """Format elapsed time for user-facing UI labels in minutes."""
+    minutes = max(seconds, 0) / 60
+    return f"{minutes:.1f}m" if minutes < 10 else f"{minutes:.0f}m"
 
 
 def _task_api_view(task: dict[str, Any], now: float) -> dict[str, Any]:
@@ -1138,6 +1144,10 @@ h1{font-size:1.5rem;margin-bottom:.25rem;color:#f0f6fc}
 </div>
 <script>
 let fetchErrorCount = 0;
+function formatElapsedMinutes(seconds) {
+  const mins = Math.max(seconds, 0) / 60;
+  return (mins < 10 ? mins.toFixed(1) : Math.round(mins).toString()) + 'm';
+}
 async function refresh() {
   try {
     const resp = await fetch('/tasks');
@@ -1158,7 +1168,7 @@ async function refresh() {
             <span><span class="indicator ${t.status}"></span> <span class="status-badge ${t.status}">${t.status}</span></span>
             <span>${t.stage || '—'}</span>
             <span>${Math.floor(t.progress*100)}%</span>
-            <span>${t.elapsed}s</span>
+            <span>${formatElapsedMinutes(t.elapsed)}</span>
           </div>
           <div class="progress-bar">
             <div class="progress-fill ${t.status}" style="width:${Math.max(t.progress*100,1)}%"></div>
