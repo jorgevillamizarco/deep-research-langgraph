@@ -8,7 +8,7 @@
 
 services:
   searxng:
-    image: searxng/searxng:2026.6.2-e964708c0
+    image: searxng/searxng:latest
     container_name: deep-research-searxng
     restart: unless-stopped
     ports:
